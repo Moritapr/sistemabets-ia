@@ -2,3 +2,4 @@ streamlit
 pandas
 lxml
 requests
+html5lib
