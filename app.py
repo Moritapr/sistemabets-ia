@@ -1,78 +1,95 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
 
-# --- CONFIGURACIÓN DE IDENTIDAD ---
-st.set_page_config(page_title="SISTEMABETS IA: CHAMPIONS ELITE", layout="wide")
+# --- CONFIGURACIÓN DEL SISTEMA ---
+st.set_page_config(page_title="SISTEMABETS IA: CORE CENTRAL", layout="wide")
 
-# TU LLAVE MAESTRA DE RAPIDAPI
-API_KEY = "97aad21a39msh44116ce32f77720p1489fcjsn7520e33e8485"
+# Mapeo de tus links
+FUENTES = {
+    "Champions League": "https://native-stats.org/competition/CL/standings",
+    "Premier League": "https://native-stats.org/competition/PL/standings",
+    "La Liga (España)": "https://native-stats.org/competition/PD/standings",
+    "Bundesliga": "https://native-stats.org/competition/BL1/standings",
+    "Serie A": "https://native-stats.org/competition/SA/standings",
+    "Ligue 1": "https://native-stats.org/competition/FL1/standings",
+    "Liga Portugal": "https://native-stats.org/competition/PPL/standings",
+    "Betting Trends": "https://native-stats.org/betting"
+}
 
-@st.cache_data(ttl=3600)
-def fetch_champions_2026():
-    # Esta API nos da acceso a la temporada actual de UEFA
-    url = "https://football-prediction-api.p.rapidapi.com/api/v2/predictions"
-    querystring = {"federation":"UEFA", "market":"classic"}
-    headers = {
-        "X-RapidAPI-Key": API_KEY,
-        "X-RapidAPI-Host": "football-prediction-api.p.rapidapi.com"
-    }
-    
+@st.cache_data(ttl=1800)
+def scraper_inteligente(url):
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        response = requests.get(url, headers=headers, params=querystring, timeout=15)
-        res_json = response.json()
+        response = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        tablas = soup.find_all('table')
         
-        if not res_json.get('data'):
-            return "No hay partidos disponibles hoy o la Key llegó al límite."
-
-        # Procesamos la data de la jornada 25/26
-        lista_partidos = []
-        for match in res_json['data']:
-            lista_partidos.append({
-                'Local': match['home_team'],
-                'Visita': match['away_team'],
-                'Prob_L': float(match['probabilities']['home']),
-                'Prob_E': float(match['probabilities']['draw']),
-                'Prob_V': float(match['probabilities']['away']),
-                'Recomendacion': match['prediction'],
-                'Fecha': match['start_date']
-            })
-        return pd.DataFrame(lista_partidos)
+        # Leemos la tabla principal de la liga
+        df = pd.read_html(str(tablas[0]))[0]
+        
+        # Estandarizamos columnas (Pos, Equipo, PJ, Pts, Dif, Goles)
+        df.columns = ['Pos', 'Equipo', 'PJ', 'Pts', 'Dif', 'Goles', 'Forma']
+        
+        # Procesamos la columna Goles (20:5) para IA
+        df[['GF', 'GC']] = df['Goles'].str.split(':', expand=True).astype(int)
+        
+        # Limpieza de nombres de equipos (quitar números de posición)
+        df['Equipo'] = df['Equipo'].str.replace(r'\d+', '', regex=True).str.strip()
+        
+        return df
     except Exception as e:
-        return f"Error de protocolo: {str(e)}"
+        return f"Error en fuente: {str(e)}"
 
-# --- INTERFAZ STREAMLIT ---
-st.title("🤖 SISTEMABETS IA: CHAMPIONS ELITE")
-st.write(f"Análisis basado en datos reales - {pd.to_datetime('today').strftime('%d/%m/%Y')}")
+# --- INTERFAZ ---
+st.sidebar.title("🔍 FUENTES DE DATOS")
+seleccion = st.sidebar.selectbox("Selecciona Link para Scrapping:", list(FUENTES.keys()))
 
-with st.spinner('Sincronizando con el servidor de predicciones UEFA...'):
-    df_matches = fetch_champions_2026()
+st.title(f"🤖 SISTEMABETS IA: MODO {seleccion.upper()}")
 
-if isinstance(df_matches, str):
-    st.error(df_matches)
-    st.info("💡 Tip: Verifica en RapidAPI que el plan 'Free' de Football Prediction esté suscrito.")
+df = scraper_inteligente(FUENTES[seleccion])
+
+if isinstance(df, str):
+    st.error(df)
 else:
-    st.success(f"✅ ¡CONEXIÓN TOTAL! {len(df_matches)} duelos de Champions analizados.")
+    st.success(f"✅ IA conectada exitosamente a: {FUENTES[seleccion]}")
     
-    # Selector de duelo
-    match_sel = st.selectbox("Selecciona el partido para analizar:", 
-                            df_matches['Local'] + " vs " + df_matches['Visita'])
-    
-    # Extraer estadísticas del partido elegido
-    data = df_matches[(df_matches['Local'] + " vs " + df_matches['Visita']) == match_sel].iloc[0]
+    # Análisis comparativo
+    c1, c2 = st.columns(2)
+    local = c1.selectbox("Local:", df['Equipo'].unique(), index=0)
+    visita = c2.selectbox("Visita:", df['Equipo'].unique(), index=1)
 
-    # --- DASHBOARD DE RESULTADOS ---
+    # --- MOTOR DE PREDICCIÓN (IA ACCEDE Y BUSCA) ---
+    stats_l = df[df['Equipo'] == local].iloc[0]
+    stats_v = df[df['Equipo'] == visita].iloc[0]
+
+    # La IA usa GF, GC, Puntos y Dif para crear el pronóstico
+    X = df[['GF', 'GC', 'Pts', 'Dif']].values
+    y = np.arange(len(df), 0, -1) # Ranking de poder inverso
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42).fit(X, y)
+    
+    # Predicción de cuotas y probabilidades
+    p_l = model.predict([[stats_l['GF'], stats_l['GC'], stats_l['Pts'], stats_l['Dif']]])[0]
+    p_v = model.predict([[stats_v['GF'], stats_v['GC'], stats_v['Pts'], stats_v['Dif']]])[0]
+    
+    prob_l = (p_l / (p_l + p_v)) * 100
+
+    # --- DASHBOARD ---
     st.divider()
-    c1, c2, c3 = st.columns(3)
-    
-    # Mostramos probabilidades reales 25/26
-    c1.metric(f"Gana {data['Local']}", f"{round(data['Prob_L']*100, 1)}%")
-    c2.metric("Empate", f"{round(data['Prob_E']*100, 1)}%")
-    c3.metric(f"Gana {data['Visita']}", f"{round(data['Prob_V']*100, 1)}%")
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Victoria {local}", f"{round(prob_l, 1)}%", f"Goles: {stats_l['GF']}")
+    m2.metric(f"Victoria {visita}", f"{round(100-prob_l, 1)}%", f"Goles: {stats_v['GF']}")
+    m3.metric("Cuota Fair", f"{round(100/prob_l, 2)}")
 
-    st.subheader("📝 Veredicto de la IA")
-    # Dinamismo visual según la probabilidad
-    color = "green" if data['Prob_L'] > 0.5 else "orange"
-    st.markdown(f"La recomendación para este encuentro es: **:{color}[{data['Recomendacion'].upper()}]**")
+    # Módulo de "Betting" integrado
+    st.subheader("📊 Análisis de Probabilidades (Mercado Over/Under)")
+    promedio_goles = (stats_l['GF'] + stats_v['GC']) / (stats_l['PJ'] + 0.1)
     
-    st.caption(f"Fecha del encuentro: {data['Fecha']}")
+    if promedio_goles > 2.5:
+        st.warning(f"⚠️ ALTA PROBABILIDAD DE OVER 2.5: El sistema detecta un flujo de {round(promedio_goles, 2)} goles.")
+    else:
+        st.info("💡 TENDENCIA UNDER: Defensas sólidas detectadas por la IA.")
