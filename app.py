@@ -7,72 +7,64 @@ from scipy.stats import poisson
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="SISTEMABETS IA v3.0 - API PRO", layout="wide")
+st.set_page_config(page_title="SISTEMABETS IA v3.0 - Football Data", layout="wide")
 
 # ============================================================================
-# MÓDULO 1: CONECTOR API-FOOTBALL
+# MÓDULO 1: CONECTOR FOOTBALL-DATA.ORG
 # ============================================================================
 
-class APIFootball:
-    """Conector profesional a API-Football (RapidAPI)"""
+class FootballDataAPI:
+    """Conector a Football-Data.org (GRATIS e ILIMITADO)"""
     
-    BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
+    BASE_URL = "https://api.football-data.org/v4"
     
     # IDs de ligas principales
     LIGAS = {
-        "Champions League": 2,
-        "Premier League": 39,
-        "La Liga": 140,
-        "Bundesliga": 78,
-        "Serie A": 135,
-        "Ligue 1": 61,
-        "Liga Portugal": 94
+        "Champions League": "CL",
+        "Premier League": "PL",
+        "La Liga": "PD",
+        "Bundesliga": "BL1",
+        "Serie A": "SA",
+        "Ligue 1": "FL1",
+        "Eredivisie": "DED",
+        "Championship": "ELC"
     }
     
     def __init__(self, api_key):
         self.headers = {
-            "X-RapidAPI-Key": api_key,
-            "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+            "X-Auth-Token": api_key
         }
     
-    def obtener_standings(self, liga_id, temporada=2024):
-        """Obtiene tabla de posiciones con stats completas"""
+    def obtener_standings(self, liga_code):
+        """Obtiene tabla de posiciones"""
         try:
-            url = f"{self.BASE_URL}/standings"
-            params = {"league": liga_id, "season": temporada}
+            url = f"{self.BASE_URL}/competitions/{liga_code}/standings"
             
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            data = response.json()
+            response = requests.get(url, headers=self.headers, timeout=15)
             
-            if not data.get('response'):
+            if response.status_code != 200:
                 return None
             
-            standings = data['response'][0]['league']['standings'][0]
+            data = response.json()
+            
+            if not data.get('standings'):
+                return None
+            
+            standings = data['standings'][0]['table']
             
             # Convertir a DataFrame
             equipos = []
             for team in standings:
                 equipos.append({
                     'Equipo': team['team']['name'],
-                    'PJ': team['all']['played'],
-                    'Victorias': team['all']['win'],
-                    'Empates': team['all']['draw'],
-                    'Derrotas': team['all']['lose'],
-                    'GF': team['all']['goals']['for'],
-                    'GC': team['all']['goals']['against'],
+                    'PJ': team['playedGames'],
+                    'Victorias': team['won'],
+                    'Empates': team['draw'],
+                    'Derrotas': team['lost'],
+                    'GF': team['goalsFor'],
+                    'GC': team['goalsAgainst'],
                     'Pts': team['points'],
-                    # Stats locales
-                    'PJ_Local': team['home']['played'],
-                    'GF_Local': team['home']['goals']['for'],
-                    'GC_Local': team['home']['goals']['against'],
-                    'Victorias_Local': team['home']['win'],
-                    # Stats visitante
-                    'PJ_Visitante': team['away']['played'],
-                    'GF_Visitante': team['away']['goals']['for'],
-                    'GC_Visitante': team['away']['goals']['against'],
-                    'Victorias_Visitante': team['away']['win'],
-                    # Forma
-                    'Forma': team['form']
+                    'Posicion': team['position']
                 })
             
             return pd.DataFrame(equipos)
@@ -81,102 +73,153 @@ class APIFootball:
             st.error(f"Error API: {str(e)}")
             return None
     
-    def obtener_pronosticos(self, fixture_id):
-        """Obtiene pronósticos de la API para un partido"""
+    def obtener_partidos_recientes(self, equipo_nombre, liga_code):
+        """Obtiene últimos 5 partidos de un equipo"""
         try:
-            url = f"{self.BASE_URL}/predictions"
-            params = {"fixture": fixture_id}
+            url = f"{self.BASE_URL}/competitions/{liga_code}/matches"
+            params = {"status": "FINISHED"}
             
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            response = requests.get(url, headers=self.headers, params=params, timeout=15)
+            
+            if response.status_code != 200:
+                return []
+            
             data = response.json()
+            partidos = []
             
-            if data.get('response'):
-                return data['response'][0]['predictions']
-            return None
+            for match in data.get('matches', [])[:50]:  # Últimos 50 partidos
+                home = match['homeTeam']['name']
+                away = match['awayTeam']['name']
+                
+                if home == equipo_nombre or away == equipo_nombre:
+                    if match['score']['fullTime']['home'] is not None:
+                        partidos.append({
+                            'local': home,
+                            'visitante': away,
+                            'goles_local': match['score']['fullTime']['home'],
+                            'goles_visitante': match['score']['fullTime']['away'],
+                            'fecha': match['utcDate']
+                        })
+            
+            return sorted(partidos, key=lambda x: x['fecha'], reverse=True)[:5]
             
         except Exception as e:
-            return None
-    
-    def obtener_cuotas(self, fixture_id):
-        """Obtiene cuotas de casas de apuestas para un partido"""
-        try:
-            url = f"{self.BASE_URL}/odds"
-            params = {"fixture": fixture_id}
-            
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            data = response.json()
-            
-            if data.get('response'):
-                return data['response'][0]['bookmakers']
-            return None
-            
-        except Exception as e:
-            return None
+            return []
 
 # ============================================================================
-# MÓDULO 2: ANALIZADOR AVANZADO
+# MÓDULO 2: ANALIZADOR AVANZADO CON FORMA
 # ============================================================================
 
 class AnalizadorAvanzado:
-    """Motor de análisis con stats locales/visitantes separadas"""
+    """Motor de análisis mejorado"""
     
     VENTAJA_LOCAL = 1.18
     
     @staticmethod
-    def calcular_lambdas_avanzado(local, visitante, df_liga):
-        """
-        Calcula lambdas usando stats específicas de local/visitante
-        Esto es MUCHO más preciso que usar stats generales
-        """
+    def calcular_forma(partidos_recientes, equipo_nombre):
+        """Calcula forma reciente (últimos 5 partidos)"""
+        if not partidos_recientes:
+            return 0.5, ""
         
-        # Potencia ofensiva del local EN CASA
-        gf_local_casa = local['GF_Local'] / max(local['PJ_Local'], 1)
+        puntos = []
+        forma_str = ""
         
-        # Debilidad defensiva del visitante FUERA
-        gc_visitante_fuera = visitante['GC_Visitante'] / max(visitante['PJ_Visitante'], 1)
+        for p in partidos_recientes:
+            es_local = p['local'] == equipo_nombre
+            gf = p['goles_local'] if es_local else p['goles_visitante']
+            gc = p['goles_visitante'] if es_local else p['goles_local']
+            
+            if gf > gc:
+                puntos.append(1.0)
+                forma_str += "V"
+            elif gf == gc:
+                puntos.append(0.5)
+                forma_str += "E"
+            else:
+                puntos.append(0.0)
+                forma_str += "D"
         
-        # Potencia ofensiva del visitante FUERA
-        gf_visitante_fuera = visitante['GF_Visitante'] / max(visitante['PJ_Visitante'], 1)
+        # Peso exponencial (último partido vale más)
+        pesos = [0.1, 0.15, 0.2, 0.25, 0.3]
+        score = sum(p * w for p, w in zip(puntos, pesos[:len(puntos)]))
         
-        # Debilidad defensiva del local EN CASA
-        gc_local_casa = local['GC_Local'] / max(local['PJ_Local'], 1)
+        return score, forma_str
+    
+    @staticmethod
+    def calcular_stats_local_visitante(equipo_nombre, partidos_recientes):
+        """Calcula stats separadas de local y visitante"""
+        stats = {
+            'gf_local': 0, 'gc_local': 0, 'pj_local': 0,
+            'gf_visitante': 0, 'gc_visitante': 0, 'pj_visitante': 0
+        }
         
-        # Medias de la liga
+        for p in partidos_recientes:
+            if p['local'] == equipo_nombre:
+                stats['gf_local'] += p['goles_local']
+                stats['gc_local'] += p['goles_visitante']
+                stats['pj_local'] += 1
+            elif p['visitante'] == equipo_nombre:
+                stats['gf_visitante'] += p['goles_visitante']
+                stats['gc_visitante'] += p['goles_local']
+                stats['pj_visitante'] += 1
+        
+        return stats
+    
+    @staticmethod
+    def calcular_lambdas_avanzado(local, visitante, df_liga, partidos_local, partidos_visitante):
+        """Calcula lambdas con stats locales/visitantes y forma"""
+        
+        # Stats básicas de la tabla
+        gf_local_total = local['GF'] / max(local['PJ'], 1)
+        gc_visitante_total = visitante['GC'] / max(visitante['PJ'], 1)
+        gf_visitante_total = visitante['GF'] / max(visitante['PJ'], 1)
+        gc_local_total = local['GC'] / max(local['PJ'], 1)
+        
+        # Stats específicas de últimos partidos
+        stats_local = AnalizadorAvanzado.calcular_stats_local_visitante(
+            local['Equipo'], partidos_local
+        )
+        stats_visitante = AnalizadorAvanzado.calcular_stats_local_visitante(
+            visitante['Equipo'], partidos_visitante
+        )
+        
+        # Ajustar con forma reciente si hay datos
+        if stats_local['pj_local'] > 0:
+            gf_local_casa = stats_local['gf_local'] / stats_local['pj_local']
+            gc_local_casa = stats_local['gc_local'] / stats_local['pj_local']
+        else:
+            gf_local_casa = gf_local_total
+            gc_local_casa = gc_local_total
+        
+        if stats_visitante['pj_visitante'] > 0:
+            gf_visitante_fuera = stats_visitante['gf_visitante'] / stats_visitante['pj_visitante']
+            gc_visitante_fuera = stats_visitante['gc_visitante'] / stats_visitante['pj_visitante']
+        else:
+            gf_visitante_fuera = gf_visitante_total
+            gc_visitante_fuera = gc_visitante_total
+        
+        # Media de la liga
         media_gf = df_liga['GF'].mean() / df_liga['PJ'].mean()
         
-        # Lambdas ajustados
+        # Lambdas
         lambda_local = (gf_local_casa / media_gf) * gc_visitante_fuera * AnalizadorAvanzado.VENTAJA_LOCAL
         lambda_visitante = (gf_visitante_fuera / media_gf) * gc_local_casa / AnalizadorAvanzado.VENTAJA_LOCAL
         
+        # Ajuste por forma
+        forma_local, _ = AnalizadorAvanzado.calcular_forma(partidos_local, local['Equipo'])
+        forma_visitante, _ = AnalizadorAvanzado.calcular_forma(partidos_visitante, visitante['Equipo'])
+        
+        if forma_local > 0.7:
+            lambda_local *= 1.15
+        elif forma_local < 0.3:
+            lambda_local *= 0.85
+        
+        if forma_visitante > 0.7:
+            lambda_visitante *= 1.15
+        elif forma_visitante < 0.3:
+            lambda_visitante *= 0.85
+        
         return lambda_local, lambda_visitante
-    
-    @staticmethod
-    def analizar_forma(forma_str):
-        """Analiza la racha reciente (formato: 'WWDLW')"""
-        if not forma_str or forma_str == 'None':
-            return 0.5
-        
-        puntos = {'W': 1.0, 'D': 0.5, 'L': 0.0}
-        ultimos = forma_str[-5:]  # Últimos 5 partidos
-        
-        # Peso exponencial: último partido vale más
-        pesos = [0.1, 0.15, 0.2, 0.25, 0.3]
-        
-        score = sum(puntos.get(r, 0.5) * w for r, w in zip(ultimos, pesos))
-        return score
-    
-    @staticmethod
-    def ajustar_por_forma(lambda_val, forma):
-        """Ajusta lambda según la forma reciente"""
-        forma_score = AnalizadorAvanzado.analizar_forma(forma)
-        
-        # Ajuste: forma excelente +15%, forma mala -15%
-        if forma_score > 0.7:
-            return lambda_val * 1.15
-        elif forma_score < 0.3:
-            return lambda_val * 0.85
-        else:
-            return lambda_val
     
     @staticmethod
     def matriz_probabilidades(lambda_l, lambda_v, max_goles=7):
@@ -293,66 +336,40 @@ class BuscadorValor:
 # ============================================================================
 
 def main():
-    st.title("⚡ SISTEMABETS IA v3.0 - ANÁLISIS PROFESIONAL")
-    st.caption("Powered by API-Football | Datos en tiempo real")
+    st.title("⚽ SISTEMABETS IA v3.0 - FOOTBALL DATA")
+    st.caption("Powered by Football-Data.org | Requests ilimitados ✅")
     
     # Sidebar - Configuración API
-    st.sidebar.header("🔑 Configuración API")
+    st.sidebar.header("🔑 Configuración")
     
     api_key = st.sidebar.text_input(
-        "API Key (RapidAPI)", 
+        "API Key", 
+        value="b5da8589cdef4d418bbe2afcbccadf10",
         type="password",
-        help="Obtén tu key gratis en: https://rapidapi.com/api-sports/api/api-football"
+        help="Tu API key de Football-Data.org"
     )
     
     if not api_key:
-        st.warning("⚠️ **Necesitas una API Key para empezar**")
-        st.info("""
-        ### Cómo obtener tu API Key GRATIS:
-        
-        1. Ve a https://rapidapi.com/api-sports/api/api-football
-        2. Crea una cuenta (gratis)
-        3. Suscríbete al plan GRATUITO (100 requests/día)
-        4. Copia tu API Key y pégala arriba
-        
-        **Sin tarjeta de crédito. 100% gratis.**
-        """)
-        
-        st.markdown("---")
-        st.subheader("🎯 ¿Por qué usar esta API?")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("✅ Datos de 1000+ ligas")
-            st.write("✅ Stats locales/visitantes")
-            st.write("✅ Forma reciente de equipos")
-            st.write("✅ Head-to-Head histórico")
-        
-        with col2:
-            st.write("✅ Cuotas en tiempo real")
-            st.write("✅ Lesiones y suspensiones")
-            st.write("✅ Pronósticos profesionales")
-            st.write("✅ JSON limpio (sin scraping)")
-        
+        st.warning("⚠️ Ingresa tu API Key")
         return
     
     # Inicializar API
-    api = APIFootball(api_key)
+    api = FootballDataAPI(api_key)
     
     # Selección de liga
-    liga_nombre = st.sidebar.selectbox("Liga:", list(APIFootball.LIGAS.keys()))
-    liga_id = APIFootball.LIGAS[liga_nombre]
-    temporada = st.sidebar.selectbox("Temporada:", [2024, 2023], index=0)
+    liga_nombre = st.sidebar.selectbox("Liga:", list(FootballDataAPI.LIGAS.keys()))
+    liga_code = FootballDataAPI.LIGAS[liga_nombre]
     
     # Cargar datos
-    with st.spinner(f"Cargando datos de {liga_nombre}..."):
-        df = api.obtener_standings(liga_id, temporada)
+    with st.spinner(f"Cargando {liga_nombre}..."):
+        df = api.obtener_standings(liga_code)
     
     if df is None or df.empty:
-        st.error("❌ Error cargando datos. Verifica tu API Key y límite de requests.")
+        st.error("❌ Error cargando datos. Verifica tu API Key.")
+        st.info("Si acabas de crear tu cuenta, espera 1-2 minutos para que se active.")
         return
     
-    st.success(f"✅ {len(df)} equipos cargados | Última actualización: {datetime.now().strftime('%H:%M:%S')}")
+    st.success(f"✅ {len(df)} equipos cargados")
     
     # Selección de equipos
     st.subheader("🎯 Seleccionar Partido")
@@ -377,13 +394,19 @@ def main():
     # ANÁLISIS
     if st.button("🔍 ANALIZAR PARTIDO", type="primary", use_container_width=True):
         
+        with st.spinner("Obteniendo forma reciente..."):
+            partidos_local = api.obtener_partidos_recientes(equipo_local, liga_code)
+            partidos_visitante = api.obtener_partidos_recientes(equipo_visitante, liga_code)
+        
         with st.spinner("Calculando probabilidades..."):
-            # Lambdas con stats locales/visitantes
-            lambda_l, lambda_v = AnalizadorAvanzado.calcular_lambdas_avanzado(el, ev, df)
+            # Lambdas con forma reciente
+            lambda_l, lambda_v = AnalizadorAvanzado.calcular_lambdas_avanzado(
+                el, ev, df, partidos_local, partidos_visitante
+            )
             
-            # Ajuste por forma
-            lambda_l = AnalizadorAvanzado.ajustar_por_forma(lambda_l, el['Forma'])
-            lambda_v = AnalizadorAvanzado.ajustar_por_forma(lambda_v, ev['Forma'])
+            # Forma
+            forma_local, forma_str_local = AnalizadorAvanzado.calcular_forma(partidos_local, equipo_local)
+            forma_visitante, forma_str_visitante = AnalizadorAvanzado.calcular_forma(partidos_visitante, equipo_visitante)
             
             # Matriz y mercados
             matriz = AnalizadorAvanzado.matriz_probabilidades(lambda_l, lambda_v)
@@ -435,23 +458,47 @@ def main():
             
             with tc1:
                 st.write(f"**{equipo_local} (Local)**")
-                st.write(f"- Forma: {el['Forma']}")
-                st.write(f"- Goles en casa: {int(el['GF_Local'])} en {int(el['PJ_Local'])} PJ")
-                st.write(f"- Promedio casa: {el['GF_Local']/max(el['PJ_Local'],1):.2f} goles/partido")
+                st.write(f"- Forma últimos 5: {forma_str_local if forma_str_local else 'N/D'}")
+                st.write(f"- Score forma: {forma_local:.2f}")
+                st.write(f"- Goles totales: {int(el['GF'])} en {int(el['PJ'])} PJ")
+                st.write(f"- Promedio: {el['GF']/max(el['PJ'],1):.2f} goles/partido")
                 st.write(f"- Lambda calculado: {lambda_l:.2f}")
             
             with tc2:
                 st.write(f"**{equipo_visitante} (Visitante)**")
-                st.write(f"- Forma: {ev['Forma']}")
-                st.write(f"- Goles fuera: {int(ev['GF_Visitante'])} en {int(ev['PJ_Visitante'])} PJ")
-                st.write(f"- Promedio fuera: {ev['GF_Visitante']/max(ev['PJ_Visitante'],1):.2f} goles/partido")
+                st.write(f"- Forma últimos 5: {forma_str_visitante if forma_str_visitante else 'N/D'}")
+                st.write(f"- Score forma: {forma_visitante:.2f}")
+                st.write(f"- Goles totales: {int(ev['GF'])} en {int(ev['PJ'])} PJ")
+                st.write(f"- Promedio: {ev['GF']/max(ev['PJ'],1):.2f} goles/partido")
                 st.write(f"- Lambda calculado: {lambda_v:.2f}")
         
+        # Últimos partidos
+        with st.expander("📋 Ver últimos partidos"):
+            c1, c2 = st.columns(2)
+            
+            with c1:
+                st.write(f"**{equipo_local}**")
+                if partidos_local:
+                    for p in partidos_local[:5]:
+                        resultado = f"{p['goles_local']}-{p['goles_visitante']}"
+                        st.write(f"• {p['local']} {resultado} {p['visitante']}")
+                else:
+                    st.write("No hay datos recientes")
+            
+            with c2:
+                st.write(f"**{equipo_visitante}**")
+                if partidos_visitante:
+                    for p in partidos_visitante[:5]:
+                        resultado = f"{p['goles_local']}-{p['goles_visitante']}"
+                        st.write(f"• {p['local']} {resultado} {p['visitante']}")
+                else:
+                    st.write("No hay datos recientes")
+        
         # Tabla completa
-        with st.expander("📋 Ver clasificación"):
+        with st.expander("🏆 Ver clasificación"):
             st.dataframe(
-                df[['Equipo', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC', 'Pts', 'Forma']]
-                .sort_values('Pts', ascending=False),
+                df[['Posicion', 'Equipo', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC', 'Pts']]
+                .sort_values('Posicion'),
                 use_container_width=True,
                 hide_index=True
             )
