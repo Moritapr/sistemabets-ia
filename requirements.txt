@@ -4,3 +4,4 @@ lxml
 requests
 html5lib
 beautifulsoup4
+scikit-learn
