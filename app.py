@@ -57,41 +57,65 @@ class ScraperMultiSource:
     @staticmethod
     def _normalizar_columnas(df):
         """Mapeo inteligente de columnas"""
+        
+        # Si viene un MultiIndex, aplanar
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [' '.join(map(str, col)).strip() for col in df.columns]
+        
         cols_map = {}
         
         for col in df.columns:
             c_upper = str(col).upper()
             
             # Identificación por palabras clave
-            if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB']):
+            if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB', 'SQUAD']):
                 cols_map[col] = 'Equipo'
             elif any(x in c_upper for x in ['PTS', 'POINTS', 'PUNTOS']):
                 cols_map[col] = 'Pts'
-            elif any(x in c_upper for x in ['MP', 'PJ', 'PLAYED']):
+            elif any(x in c_upper for x in ['MP', 'PJ', 'PLAYED', 'MATCHES']):
                 cols_map[col] = 'PJ'
-            elif any(x in c_upper for x in ['W', 'G', 'WINS']):
+            elif any(x in c_upper for x in ['W', 'G', 'WINS', 'WON']):
                 cols_map[col] = 'Victorias'
-            elif any(x in c_upper for x in ['D', 'E', 'DRAWS']):
+            elif any(x in c_upper for x in ['D', 'E', 'DRAWS', 'DRAW']):
                 cols_map[col] = 'Empates'
-            elif any(x in c_upper for x in ['L', 'P', 'LOSS']):
+            elif any(x in c_upper for x in ['L', 'P', 'LOSS', 'LOST']):
                 cols_map[col] = 'Derrotas'
         
         df = df.rename(columns=cols_map)
         
-        # Limpieza de equipo
+        # Limpieza de equipo (FIX CRÍTICO)
         if 'Equipo' in df.columns:
-            df['Equipo'] = df['Equipo'].astype(str).str.replace(r'^\d+\s+', '', regex=True).str.strip()
+            # Convertir toda la columna primero
+            df['Equipo'] = df['Equipo'].apply(lambda x: str(x))
+            # Ahora sí aplicar regex
+            df['Equipo'] = df['Equipo'].str.replace(r'^\d+\s+', '', regex=True).str.strip()
         
-        # Extracción de goles (formato X:Y)
+        # Extracción de goles (formato X:Y) - FIX CRÍTICO
+        goles_encontrados = False
         for col in df.columns:
-            if df[col].astype(str).str.contains(':').any():
-                goles = df[col].astype(str).str.extract(r'(\d+):(\d+)')
-                df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0)
-                df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0)
-                break
+            try:
+                # Verificar si la columna tiene el formato de goles
+                col_str = df[col].astype(str)
+                if col_str.str.contains(':', na=False).any():
+                    goles = col_str.str.extract(r'(\d+):(\d+)', expand=True)
+                    df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0)
+                    df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0)
+                    goles_encontrados = True
+                    break
+            except:
+                continue
+        
+        # Si no se encontraron goles, buscar columnas separadas
+        if not goles_encontrados:
+            for col in df.columns:
+                c_upper = str(col).upper()
+                if 'GF' in c_upper or 'SCORED' in c_upper or 'FOR' in c_upper:
+                    df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                if 'GC' in c_upper or 'CONCEDED' in c_upper or 'AGAINST' in c_upper:
+                    df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         # Conversiones seguras
-        for col in ['Pts', 'PJ', 'Victorias', 'Empates', 'Derrotas']:
+        for col in ['Pts', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
