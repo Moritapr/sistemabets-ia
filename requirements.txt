@@ -3,5 +3,3 @@ pandas
 numpy
 scipy
 requests
-beautifulsoup4
-lxml
