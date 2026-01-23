@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 
 # --- CONFIGURACIÓN DE IDENTIDAD ---
-st.set_page_config(page_title="SISTEMABETS IA: CHAMPIONS 25/26", layout="wide")
+st.set_page_config(page_title="SISTEMABETS IA: CHAMPIONS ELITE", layout="wide")
 
 # TU LLAVE MAESTRA DE RAPIDAPI
 API_KEY = "97aad21a39msh44116ce32f77720p1489fcjsn7520e33e8485"
@@ -71,7 +71,8 @@ else:
     c3.metric(f"Gana {data['Visita']}", f"{round(data['Prob_V']*100, 1)}%")
 
     st.subheader("📝 Veredicto de la IA")
-    color = "green" if data['Prob_L'] > 0.6 else "orange"
+    # Dinamismo visual según la probabilidad
+    color = "green" if data['Prob_L'] > 0.5 else "orange"
     st.markdown(f"La recomendación para este encuentro es: **:{color}[{data['Recomendacion'].upper()}]**")
     
     st.caption(f"Fecha del encuentro: {data['Fecha']}")
