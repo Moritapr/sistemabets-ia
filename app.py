@@ -3,117 +3,102 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 
-# --- CONFIGURACIÓN CENTRAL ---
-st.set_page_config(page_title="SISTEMABETS IA: FULL-DATA", layout="wide")
+# --- CONFIGURACIÓN DE ALTA PRECISIÓN ---
+st.set_page_config(page_title="SISTEMABETS IA: PRO ANALYST", layout="wide")
 
-# RESPETAMOS TUS LINKS EXACTAMENTE COMO LOS PASASTE
 FUENTES = {
     "Champions League": "https://native-stats.org/competition/CL/",
     "Premier League": "https://native-stats.org/competition/PL",
-    "La Liga (España)": "https://native-stats.org/competition/PD",
+    "La Liga": "https://native-stats.org/competition/PD",
     "Bundesliga": "https://native-stats.org/competition/BL1",
     "Serie A": "https://native-stats.org/competition/SA",
     "Ligue 1": "https://native-stats.org/competition/FL1",
     "Liga Portugal": "https://native-stats.org/competition/PPL",
     "Betting Trends": "https://native-stats.org/betting",
-    "Perfil Equipo (ID:81)": "https://native-stats.org/team/81",
+    "Real Madrid Profile": "https://native-stats.org/team/81",
     "Home": "https://native-stats.org/"
 }
 
-@st.cache_data(ttl=1800)
-def scraper_puro(url):
-    # Usamos un User-Agent de Chrome real para evitar bloqueos
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
+@st.cache_data(ttl=600)
+def super_scrapper_v3(url):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        # Entramos al link tal cual lo pasaste
-        response = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Buscamos todas las tablas en la página
+        res = requests.get(url, headers=headers, timeout=15)
+        soup = BeautifulSoup(res.content, 'html.parser')
         tablas = soup.find_all('table')
+        if not tablas: return None
         
-        if not tablas:
-            return "No se detectaron tablas en este link. Verifica si la página cargó correctamente."
-
-        # Buscamos la tabla que parezca una clasificación (la que tenga más filas)
-        tabla_principal = max(tablas, key=lambda t: len(t.find_all('tr')))
-        df = pd.read_html(str(tabla_principal))[0]
-
-        # Limpieza básica para que la IA no explote
-        # Native-stats suele tener: Pos, Team, P, W, D, L, Goals, Diff, Pts
-        if len(df.columns) >= 7:
-            # Forzamos nombres de columnas estándar para el modelo
-            df = df.iloc[:, :9] # Tomamos las primeras 9 columnas si existen
-            # Asignamos nombres basados en la estructura común de Native Stats
-            # Nota: Esto se adapta si la tabla tiene menos columnas
-            cols = ['Pos', 'Equipo', 'PJ', 'V', 'E', 'D', 'Goles', 'Dif', 'Pts']
-            df.columns = cols[:len(df.columns)]
+        df = pd.read_html(str(max(tablas, key=lambda t: len(t.find_all('tr')))))[0]
         
-        # Limpiar nombres (Quitar el número de posición que a veces viene pegado)
+        # Mapeo posicional inteligente
+        df = df.rename(columns={df.columns[0]: 'Pos', df.columns[1]: 'Equipo', df.columns[-1]: 'Pts'})
         df['Equipo'] = df['Equipo'].astype(str).str.replace(r'^\d+\s+', '', regex=True).str.strip()
         
-        # Procesar Goles "20:2" si existe la columna
-        if 'Goles' in df.columns:
-            goles_split = df['Goles'].astype(str).str.split(':', expand=True)
-            df['GF'] = pd.to_numeric(goles_split[0], errors='coerce').fillna(0).astype(int)
-            df['GC'] = pd.to_numeric(goles_split[1], errors='coerce').fillna(0).astype(int)
+        # Extracción de métricas de mercado (Goles)
+        for col in df.columns:
+            if ":" in str(df[col].iloc[0]):
+                gs = df[col].astype(str).str.split(':', expand=True)
+                df['GF'] = pd.to_numeric(gs[0], errors='coerce').fillna(0).astype(int)
+                df['GC'] = pd.to_numeric(gs[1], errors='coerce').fillna(0).astype(int)
+                break
+        
+        # Cálculo de Forma (Puntos por partido aproximados)
+        df['PJ'] = pd.to_numeric(df.iloc[:, 2], errors='coerce').fillna(1)
+        df['Rating_Ataque'] = df['GF'] / df['PJ']
+        df['Rating_Defensa'] = df['GC'] / df['PJ']
         
         return df
-    except Exception as e:
-        return f"Error al acceder al link: {str(e)}"
+    except: return None
 
-# --- INTERFAZ ---
-st.sidebar.title("🔍 CONTROL DE FUENTES")
-seleccion = st.sidebar.selectbox("Selecciona Link Real:", list(FUENTES.keys()))
+# --- INTERFAZ DE USUARIO ---
+st.title("🏆 SISTEMABETS IA: ESTRATEGIA DE MERCADOS")
+sel = st.sidebar.selectbox("Selecciona Competición:", list(FUENTES.keys()))
+data = super_scrapper_v3(FUENTES[sel])
 
-st.title(f"🤖 SISTEMABETS IA: MODO {seleccion.upper()}")
-st.info(f"Conectado a: {FUENTES[seleccion]}")
-
-df = scraper_puro(FUENTES[seleccion])
-
-if isinstance(df, str):
-    st.error(df)
-else:
-    st.success(f"✅ ¡DENTRO! {len(df)} registros detectados.")
+if data is not None:
+    st.success(f"Sincronizado con data real 25/26")
     
-    # Mostrar la tabla para que verifiques que es la correcta
-    with st.expander("Ver tabla de datos crudos"):
-        st.dataframe(df)
+    col1, col2 = st.columns(2)
+    l_team = col1.selectbox("Local:", data['Equipo'].unique(), index=2)
+    v_team = col2.selectbox("Visitante:", data['Equipo'].unique(), index=0)
 
-    # Análisis de Duelo si la tabla tiene equipos y puntos
-    if 'Equipo' in df.columns and 'Pts' in df.columns:
-        c1, c2 = st.columns(2)
-        local = c1.selectbox("Local:", df['Equipo'].unique(), index=2 if len(df)>2 else 0)
-        visita = c2.selectbox("Visita:", df['Equipo'].unique(), index=0)
+    # --- MOTOR DE INFERENCIA ---
+    l_stats = data[data['Equipo'] == l_team].iloc[0]
+    v_stats = data[data['Equipo'] == v_team].iloc[0]
 
-        # --- MOTOR IA (Random Forest) ---
-        try:
-            stats_l = df[df['Equipo'] == local].iloc[0]
-            stats_v = df[df['Equipo'] == visita].iloc[0]
+    # Probabilidades de victoria (Win/Draw/Loss)
+    win_prob = (l_stats['Pts'] / (l_stats['Pts'] + v_stats['Pts'] + 0.1)) * 100
+    
+    # Análisis de Goles (Over/Under 2.5)
+    expectativa_goles = (l_stats['Rating_Ataque'] + v_stats['Rating_Ataque']) / 2
+    expectativa_recibo = (l_stats['Rating_Defensa'] + v_stats['Rating_Defensa']) / 2
+    total_esperado = expectativa_goles + expectativa_recibo
 
-            # Si no hay GF/GC (como en el link de /betting), usamos Puntos y Posición
-            features = ['Pts']
-            if 'GF' in df.columns: features.extend(['GF', 'GC'])
-            
-            X = df[features].fillna(0).values
-            y = np.arange(len(df), 0, -1)
-            
-            model = RandomForestRegressor(n_estimators=100, random_state=42).fit(X, y)
-            
-            # Predicción
-            pred_l = model.predict([stats_l[features].fillna(0).values])[0]
-            pred_v = model.predict([stats_v[features].fillna(0).values])[0]
-            
-            prob_l = (pred_l / (pred_l + pred_v)) * 100
+    # --- DASHBOARD DE APUESTAS ---
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.subheader("🎯 Ganador")
+        st.metric(l_team, f"{round(win_prob, 1)}%")
+        st.metric(v_team, f"{round(100-win_prob, 1)}%")
 
-            st.divider()
-            m1, m2, m3 = st.columns(3)
-            m1.metric(f"Victoria {local}", f"{round(prob_l, 1)}%")
-            m2.metric(f"Victoria {visita}", f"{round(100-prob_l, 1)}%")
-            m3.metric("Probabilidad Empate", f"{round(abs(prob_l - (100-prob_l)), 1)}%")
-        except:
-            st.warning("Esta tabla no tiene el formato estándar de liga para el análisis comparativo.")
+    with c2:
+        st.subheader("⚽ Goles (O/U)")
+        if total_esperado > 2.5:
+            st.warning(f"PICK: Over 2.5 ({round(total_esperado, 2)})")
+        else:
+            st.info(f"PICK: Under 2.5 ({round(total_esperado, 2)})")
+
+    with c3:
+        st.subheader("🔥 Ambos Marcan")
+        btts = "SÍ" if l_stats['Rating_Ataque'] > 1.2 and v_stats['Rating_Ataque'] > 1.2 else "NO"
+        st.subheader(f"VERDICTO: {btts}")
+
+    st.write("---")
+    st.caption(f"Análisis basado en el rendimiento actual: {l_team} marca {round(l_stats['Rating_Ataque'],2)} goles/partido vs {v_team}.")
+
+else:
+    st.error("Error al conectar. Verifica los links o el tráfico en Native-Stats.")
