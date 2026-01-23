@@ -120,9 +120,12 @@ class ScraperMultiSource:
         # Si no se mapeó "Equipo", usar la primera columna de texto
         if 'Equipo' not in df.columns:
             for col in df.columns:
-                if df[col].dtype == 'object':
-                    df['Equipo'] = df[col]
-                    break
+                try:
+                    if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
+                        df['Equipo'] = df[col]
+                        break
+                except:
+                    continue
         
         # Limpieza de equipo
         if 'Equipo' in df.columns:
