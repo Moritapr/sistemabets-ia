@@ -2,4 +2,6 @@ streamlit
 pandas
 numpy
 requests
+beautifulsoup4
+lxml
 scikit-learn
