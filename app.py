@@ -89,12 +89,18 @@ class ScraperMultiSource:
     def _normalizar_columnas(df):
         """Mapeo inteligente de columnas"""
         
+        # CRÍTICO: Resetear índice y eliminar duplicados
+        df = df.reset_index(drop=True)
+        
         # Si viene un MultiIndex, aplanar
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [' '.join(map(str, col)).strip() for col in df.columns]
+            df.columns = ['_'.join(map(str, col)).strip() for col in df.columns]
         
-        # Asegurar que las columnas sean strings
+        # Asegurar que las columnas sean strings únicos
         df.columns = [str(col) for col in df.columns]
+        
+        # Eliminar columnas duplicadas
+        df = df.loc[:, ~df.columns.duplicated()]
         
         cols_map = {}
         
@@ -102,17 +108,17 @@ class ScraperMultiSource:
             c_upper = col.upper()
             
             # Identificación por palabras clave
-            if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB', 'SQUAD']):
+            if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB', 'SQUAD']) and 'Equipo' not in cols_map.values():
                 cols_map[col] = 'Equipo'
-            elif any(x in c_upper for x in ['PTS', 'POINTS', 'PUNTOS']):
+            elif any(x in c_upper for x in ['PTS', 'POINTS', 'PUNTOS']) and 'Pts' not in cols_map.values():
                 cols_map[col] = 'Pts'
-            elif any(x in c_upper for x in ['MP', 'PJ', 'PLAYED', 'MATCHES']):
+            elif any(x in c_upper for x in ['MP', 'PJ', 'PLAYED', 'MATCHES']) and 'PJ' not in cols_map.values():
                 cols_map[col] = 'PJ'
-            elif any(x in c_upper for x in ['W', 'G', 'WINS', 'WON']):
+            elif any(x in c_upper for x in ['W', 'G', 'WINS', 'WON']) and 'Victorias' not in cols_map.values():
                 cols_map[col] = 'Victorias'
-            elif any(x in c_upper for x in ['D', 'E', 'DRAWS', 'DRAW']):
+            elif any(x in c_upper for x in ['D', 'E', 'DRAWS', 'DRAW']) and 'Empates' not in cols_map.values():
                 cols_map[col] = 'Empates'
-            elif any(x in c_upper for x in ['L', 'P', 'LOSS', 'LOST']):
+            elif any(x in c_upper for x in ['L', 'P', 'LOSS', 'LOST']) and 'Derrotas' not in cols_map.values():
                 cols_map[col] = 'Derrotas'
         
         df = df.rename(columns=cols_map)
@@ -122,7 +128,7 @@ class ScraperMultiSource:
             for col in df.columns:
                 try:
                     if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-                        df['Equipo'] = df[col]
+                        df = df.rename(columns={col: 'Equipo'})
                         break
                 except:
                     continue
@@ -130,12 +136,7 @@ class ScraperMultiSource:
         # Limpieza de equipo
         if 'Equipo' in df.columns:
             try:
-                # Convertir a string de forma segura
-                df['Equipo'] = df['Equipo'].apply(lambda x: str(x) if pd.notna(x) else '')
-                # Remover números iniciales (posición en tabla)
-                df['Equipo'] = df['Equipo'].str.replace(r'^\d+\.?\s*', '', regex=True)
-                df['Equipo'] = df['Equipo'].str.strip()
-                # Filtrar filas vacías
+                df['Equipo'] = df['Equipo'].astype(str).str.replace(r'^\d+\.?\s*', '', regex=True).str.strip()
                 df = df[df['Equipo'].str.len() > 0]
             except Exception as e:
                 st.warning(f"Advertencia al limpiar equipos: {e}")
@@ -144,13 +145,9 @@ class ScraperMultiSource:
         goles_encontrados = False
         for col in df.columns:
             try:
-                # Convertir columna a string de forma segura
-                col_values = df[col].apply(lambda x: str(x) if pd.notna(x) else '')
-                
-                # Verificar si contiene formato de goles
-                if col_values.str.contains(':', regex=False).any():
-                    # Extraer goles
-                    goles = col_values.str.extract(r'(\d+):(\d+)', expand=True)
+                col_str = df[col].astype(str)
+                if col_str.str.contains(':', regex=False).any():
+                    goles = col_str.str.extract(r'(\d+):(\d+)', expand=True)
                     if goles is not None and len(goles.columns) == 2:
                         df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0).astype(int)
                         df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0).astype(int)
@@ -163,24 +160,36 @@ class ScraperMultiSource:
         if not goles_encontrados:
             for col in df.columns:
                 c_upper = str(col).upper()
-                if 'GF' in c_upper or 'SCORED' in c_upper or ('GOALS' in c_upper and 'FOR' in c_upper):
-                    df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                if 'GC' in c_upper or 'GA' in c_upper or 'CONCEDED' in c_upper or ('GOALS' in c_upper and 'AGAINST' in c_upper):
-                    df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                try:
+                    if ('GF' in c_upper or 'SCORED' in c_upper) and 'GF' not in df.columns:
+                        df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                    if ('GC' in c_upper or 'GA' in c_upper or 'CONCEDED' in c_upper) and 'GC' not in df.columns:
+                        df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                except:
+                    continue
         
         # Si aún no hay PJ, intentar contarlo de W+D+L
         if 'PJ' not in df.columns:
-            if all(x in df.columns for x in ['Victorias', 'Empates', 'Derrotas']):
-                df['PJ'] = df['Victorias'] + df['Empates'] + df['Derrotas']
+            try:
+                if all(x in df.columns for x in ['Victorias', 'Empates', 'Derrotas']):
+                    df['PJ'] = df['Victorias'] + df['Empates'] + df['Derrotas']
+            except:
+                pass
         
         # Conversiones seguras finales
         for col in ['Pts', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC']:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                try:
+                    # Asegurar que sea una Serie, no DataFrame
+                    if isinstance(df[col], pd.DataFrame):
+                        df[col] = df[col].iloc[:, 0]
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                except Exception as e:
+                    st.warning(f"Error convirtiendo columna {col}: {e}")
         
         # Si PJ sigue sin existir o tiene ceros, usar valor por defecto
         if 'PJ' not in df.columns or df['PJ'].sum() == 0:
-            df['PJ'] = 10  # Valor asumido para evitar divisiones por cero
+            df['PJ'] = 10
         
         return df
 
