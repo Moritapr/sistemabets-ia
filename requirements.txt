@@ -1,7 +1,8 @@
 streamlit
 pandas
-lxml
+numpy
+scikit-learn
 requests
+lxml
 html5lib
 beautifulsoup4
-scikit-learn
