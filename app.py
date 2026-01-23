@@ -3,8 +3,11 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import re
+import numpy as np
+from scipy.stats import poisson
 
-st.set_page_config(page_title="SISTEMABETS IA: DATA REAL", layout="wide")
+# --- CONFIGURACIÓN DE INGENIERÍA DE DATOS ---
+st.set_page_config(page_title="SISTEMABETS IA: PROFESIONAL V6", layout="wide")
 
 FUENTES = {
     "Champions League": "https://native-stats.org/competition/CL/",
@@ -18,100 +21,119 @@ FUENTES = {
     "Real Madrid Profile": "https://native-stats.org/team/81"
 }
 
-def limpiar_numero(valor):
-    """Limpia strings para que Python los entienda como números reales."""
-    try:
-        # Elimina cualquier cosa que no sea número o punto decimal
-        limpio = re.sub(r'[^\d.]+', '', str(valor))
-        return float(limpio) if limpio else 0.0
-    except:
-        return 0.0
-
-@st.cache_data(ttl=600)
-def scraper_precision(url):
+def extractor_quirurgico(url):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     try:
-        res = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(res.content, 'html.parser')
+        response = requests.get(url, headers=headers, timeout=20)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 1. Buscamos la tabla de clasificación real
         tablas = soup.find_all('table')
         if not tablas: return None
         
-        # Seleccionamos la tabla de liga (usualmente la que tiene más de 10 filas)
-        tabla_principal = max(tablas, key=lambda t: len(t.find_all('tr')))
-        df = pd.read_html(str(tabla_principal))[0]
+        # Filtramos tablas que no tengan suficientes filas para ser una liga
+        tablas_validas = [t for t in tablas if len(t.find_all('tr')) > 5]
+        if not tablas_validas: return None
         
-        # Mapeo posicional inamovible
+        # 2. Parseo y limpieza de estructura
+        df = pd.read_html(str(tablas_validas[0]))[0]
+        
+        # Mapeo por inspección de columnas (buscamos Puntos y Equipo por contenido)
+        for col in df.columns:
+            # Si la columna tiene ":" es la de goles
+            if df[col].astype(str).str.contains(':').any():
+                df = df.rename(columns={col: 'Goles_Raw'})
+            # Si tiene números del 1 al 20 suele ser Posición o PJ
+            # Asumimos posición estándar de Native-Stats: [1]=Equipo, [Ult]=Pts
+        
         df = df.rename(columns={df.columns[1]: 'Equipo', df.columns[-1]: 'Pts'})
-        
-        # Limpieza de nombres de equipos
         df['Equipo'] = df['Equipo'].astype(str).str.replace(r'^\d+\s+', '', regex=True).str.strip()
         
-        # LIMPIEZA PROFUNDA DE PUNTOS
-        df['Pts'] = df['Pts'].apply(limpiar_numero)
-        
-        # Búsqueda y limpieza de Goles (GF:GC)
-        df['GF'], df['GC'] = 0.0, 0.0
+        # 3. VERIFICACIÓN DE INTEGRIDAD DE DATOS (No valores neutros)
+        # Extraemos GF y GC solo si el formato es correcto
+        if 'Goles_Raw' in df.columns:
+            # Filtramos solo filas donde el formato sea N:N
+            mask = df['Goles_Raw'].astype(str).str.contains(r'\d+:\d+')
+            df = df[mask].copy()
+            
+            gs = df['Goles_Raw'].str.split(':', expand=True)
+            df['GF'] = pd.to_numeric(gs[0])
+            df['GC'] = pd.to_numeric(gs[1])
+        else:
+            return "ERROR_ESTRUCTURA: No se halló columna de goles real."
+
+        # Extraemos PJ (Partidos Jugados) buscando la columna con valores entre 1 y 60
         for col in df.columns:
-            sample = str(df[col].iloc[0])
-            if ":" in sample:
-                gs = df[col].astype(str).str.split(':', expand=True)
-                df['GF'] = gs[0].apply(limpiar_numero)
-                df['GC'] = gs[1].apply(limpiar_numero)
-                break
+            if col not in ['Equipo', 'Pts', 'Goles_Raw', 'GF', 'GC']:
+                val = pd.to_numeric(df[col], errors='coerce').iloc[0]
+                if 1 <= val <= 60:
+                    df['PJ'] = pd.to_numeric(df[col])
+                    break
         
-        # Partidos Jugados (PJ) - suele ser la 3ra columna
-        df['PJ'] = df.iloc[:, 2].apply(limpiar_numero).replace(0, 1)
+        # 4. RATINGS TÉCNICOS (Calculados sobre data pura)
+        df['Pts'] = pd.to_numeric(df['Pts'])
+        df['Ataque'] = df['GF'] / df['PJ']
+        df['Defensa'] = df['GC'] / df['PJ']
         
-        return df
+        return df[['Equipo', 'PJ', 'GF', 'GC', 'Pts', 'Ataque', 'Defensa']]
     except Exception as e:
-        st.error(f"Error en el flujo de datos: {e}")
-        return None
+        return f"ERROR_SISTEMA: {str(e)}"
 
 # --- INTERFAZ ---
-st.title("🤖 SISTEMABETS IA: ANÁLISIS DE MERCADOS")
-sel = st.sidebar.selectbox("Selecciona Competición:", list(FUENTES.keys()))
-data = scraper_precision(FUENTES[sel])
+st.title("🎯 SISTEMABETS IA: ENGINE V6 - PRECISIÓN MILITAR")
+comp = st.sidebar.selectbox("LIGA ACTUAL:", list(FUENTES.keys()))
+df = extractor_quirurgico(FUENTES[comp])
 
-if data is not None:
-    st.success(f"Sincronizado con data real 25/26")
+if isinstance(df, pd.DataFrame):
+    st.success(f"Conexión verificada: {comp} 2026. Datos 100% reales.")
     
-    # Selector de equipos
-    equipos = data['Equipo'].unique()
-    c1, c2 = st.columns(2)
-    l_team = c1.selectbox("Local:", equipos, index=min(2, len(equipos)-1))
-    v_team = c2.selectbox("Visitante:", equipos, index=0)
+    # Análisis entre equipos
+    col_l, col_v = st.columns(2)
+    l_team = col_l.selectbox("Local:", df['Equipo'].unique(), index=2)
+    v_team = col_v.selectbox("Visita:", df['Equipo'].unique(), index=0)
 
-    # --- LÓGICA DE APUESTAS CON DATA REAL ---
-    l_stats = data[data['Equipo'] == l_team].iloc[0]
-    v_stats = data[data['Equipo'] == v_team].iloc[0]
+    # Selección de filas
+    s_l = df[df['Equipo'] == l_team].iloc[0]
+    s_v = df[df['Equipo'] == v_team].iloc[0]
 
-    # Probabilidad basada en puntos reales
-    prob_l = (l_stats['Pts'] / (l_stats['Pts'] + v_stats['Pts'] + 0.1)) * 100
+    # MOTOR DE POISSON PARA MERCADOS (O/U y 1X2)
+    # Proyectamos goles esperados basados en fortaleza vs debilidad
+    exp_l = s_l['Ataque'] * (s_v['Defensa'] / df['Defensa'].mean())
+    exp_v = s_v['Ataque'] * (s_l['Defensa'] / df['Defensa'].mean())
+
+    # Matriz de Poisson (Probabilidad de cada marcador hasta 6 goles)
+    prob_matrix = np.outer(poisson.pmf(range(7), exp_l), poisson.pmf(range(7), exp_v))
     
-    # Análisis de Over/Under y Ambos Marcan
-    ataque_l = l_stats['GF'] / l_stats['PJ']
-    defensa_v = v_stats['GC'] / v_stats['PJ']
-    expectativa = (ataque_l + defensa_v) # Proyección de goles del local
+    p_l = np.sum(np.tril(prob_matrix, -1))
+    p_e = np.sum(np.diag(prob_matrix))
+    p_v = np.sum(np.triu(prob_matrix, 1))
+    p_over = 1 - (prob_matrix[0,0] + prob_matrix[0,1] + prob_matrix[1,0] + prob_matrix[1,1] + prob_matrix[2,0] + prob_matrix[0,2])
 
-    # --- PANEL DE VEREDICTOS ---
+    # --- DASHBOARD DE INGENIERÍA ---
     st.divider()
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"Gana {l_team}", f"{round(p_l*100, 1)}%", f"Pts: {int(s_l['Pts'])}")
+    m2.metric("Empate", f"{round(p_e*100, 1)}%")
+    m3.metric(f"Gana {v_team}", f"{round(p_v*100, 1)}%", f"Pts: {int(s_v['Pts'])}")
+    m4.metric("Prob. Over 2.5", f"{round(p_over*100, 1)}%")
+
+    # Comparativa de Rendimiento Real
     
-    with m1:
-        st.subheader("🎯 Ganador")
-        st.metric(l_team, f"{round(prob_l, 1)}%", f"Pts: {int(l_stats['Pts'])}")
-        st.metric(v_team, f"{round(100-prob_l, 1)}%", f"Pts: {int(v_stats['Pts'])}")
+    st.subheader("📊 Análisis de Fuerza de Ataque vs Resistencia")
+    c1, c2 = st.columns(2)
+    c1.write(f"**Ataque {l_team}:** {round(s_l['Ataque'], 2)} goles/partido")
+    c1.progress(min(s_l['Ataque']/3, 1.0))
+    c2.write(f"**Defensa {v_team} (Recibidos):** {round(s_v['Defensa'], 2)} goles/partido")
+    c2.progress(min(s_v['Defensa']/3, 1.0))
 
-    with m2:
-        st.subheader("⚽ Over/Under 2.5")
-        pick_ou = "OVER" if (ataque_l + (v_stats['GF']/v_stats['PJ'])) > 2.5 else "UNDER"
-        st.write(f"Veredicto: **{pick_ou}**")
-        st.caption(f"Arsenal promedia {round(data[data['Equipo']=='Arsenal']['GF'].iloc[0]/data[data['Equipo']=='Arsenal']['PJ'].iloc[0], 2)} goles.")
+    # VEREDICTO FINAL
+    st.divider()
+    if p_over > 0.65:
+        st.error(f"🔥 PICK SUGERIDO: OVER 2.5 GOLES (Confianza alta: {round(p_over*100,1)}%)")
+    elif p_l > 0.60:
+        st.success(f"💰 PICK SUGERIDO: VICTORIA {l_team.upper()}")
+    else:
+        st.info("💡 MERCADO COMPLEJO: Se sugiere esperar a Live o buscar Hándicap.")
 
-    with m3:
-        st.subheader("🔥 Ambos Marcan")
-        btts = "SÍ" if ataque_l > 1.1 and (v_stats['GF']/v_stats['PJ']) > 1.1 else "NO"
-        st.write(f"Veredicto: **{btts}**")
-
-    st.write("---")
-    st.info(f"Análisis IA: El sistema está operando con los {int(l_stats['Pts'])} pts de {l_team} y los {int(v_stats['Pts'])} de {v_team}.")
+else:
+    st.error(df if df else "No se pudo extraer la tabla. El sitio Native-Stats ha cambiado su estructura.")
