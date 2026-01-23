@@ -36,22 +36,53 @@ class ScraperMultiSource:
         """Extrae tabla de posiciones con stats locales/visitantes"""
         try:
             response = requests.get(url, headers=ScraperMultiSource.HEADERS, timeout=15)
+            response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Buscar tabla principal
-            tablas = pd.read_html(str(soup))
-            if not tablas:
+            # Buscar todas las tablas
+            tablas_html = soup.find_all('table')
+            if not tablas_html:
+                st.error("No se encontraron tablas en la página")
                 return None
-                
-            df = tablas[0]
+            
+            # Intentar parsear cada tabla hasta encontrar una válida
+            df = None
+            for i, tabla in enumerate(tablas_html):
+                try:
+                    # Parsear tabla individual
+                    dfs = pd.read_html(str(tabla))
+                    if dfs and len(dfs) > 0:
+                        temp_df = dfs[0]
+                        
+                        # Validar que tenga suficientes filas (al menos 5 equipos)
+                        if len(temp_df) >= 5:
+                            df = temp_df
+                            break
+                except Exception as parse_error:
+                    continue
+            
+            if df is None:
+                st.error("No se pudo parsear ninguna tabla válida")
+                return None
+            
+            # Resetear índice por si acaso
+            df = df.reset_index(drop=True)
             
             # Normalización dinámica de columnas
             df = ScraperMultiSource._normalizar_columnas(df)
+            
+            # Validar que tenga las columnas mínimas necesarias
+            if 'Equipo' not in df.columns or 'GF' not in df.columns:
+                st.error(f"Columnas encontradas: {list(df.columns)}")
+                st.error("No se encontraron las columnas necesarias (Equipo, GF, GC)")
+                return None
             
             return df
             
         except Exception as e:
             st.error(f"Error extrayendo {url}: {str(e)}")
+            import traceback
+            st.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     @staticmethod
@@ -62,10 +93,13 @@ class ScraperMultiSource:
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [' '.join(map(str, col)).strip() for col in df.columns]
         
+        # Asegurar que las columnas sean strings
+        df.columns = [str(col) for col in df.columns]
+        
         cols_map = {}
         
         for col in df.columns:
-            c_upper = str(col).upper()
+            c_upper = col.upper()
             
             # Identificación por palabras clave
             if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB', 'SQUAD']):
@@ -83,41 +117,67 @@ class ScraperMultiSource:
         
         df = df.rename(columns=cols_map)
         
-        # Limpieza de equipo (FIX CRÍTICO)
-        if 'Equipo' in df.columns:
-            # Convertir toda la columna primero
-            df['Equipo'] = df['Equipo'].apply(lambda x: str(x))
-            # Ahora sí aplicar regex
-            df['Equipo'] = df['Equipo'].str.replace(r'^\d+\s+', '', regex=True).str.strip()
+        # Si no se mapeó "Equipo", usar la primera columna de texto
+        if 'Equipo' not in df.columns:
+            for col in df.columns:
+                if df[col].dtype == 'object':
+                    df['Equipo'] = df[col]
+                    break
         
-        # Extracción de goles (formato X:Y) - FIX CRÍTICO
+        # Limpieza de equipo
+        if 'Equipo' in df.columns:
+            try:
+                # Convertir a string de forma segura
+                df['Equipo'] = df['Equipo'].apply(lambda x: str(x) if pd.notna(x) else '')
+                # Remover números iniciales (posición en tabla)
+                df['Equipo'] = df['Equipo'].str.replace(r'^\d+\.?\s*', '', regex=True)
+                df['Equipo'] = df['Equipo'].str.strip()
+                # Filtrar filas vacías
+                df = df[df['Equipo'].str.len() > 0]
+            except Exception as e:
+                st.warning(f"Advertencia al limpiar equipos: {e}")
+        
+        # Extracción de goles (formato X:Y)
         goles_encontrados = False
         for col in df.columns:
             try:
-                # Verificar si la columna tiene el formato de goles
-                col_str = df[col].astype(str)
-                if col_str.str.contains(':', na=False).any():
-                    goles = col_str.str.extract(r'(\d+):(\d+)', expand=True)
-                    df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0)
-                    df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0)
-                    goles_encontrados = True
-                    break
-            except:
+                # Convertir columna a string de forma segura
+                col_values = df[col].apply(lambda x: str(x) if pd.notna(x) else '')
+                
+                # Verificar si contiene formato de goles
+                if col_values.str.contains(':', regex=False).any():
+                    # Extraer goles
+                    goles = col_values.str.extract(r'(\d+):(\d+)', expand=True)
+                    if goles is not None and len(goles.columns) == 2:
+                        df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0).astype(int)
+                        df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0).astype(int)
+                        goles_encontrados = True
+                        break
+            except Exception as e:
                 continue
         
-        # Si no se encontraron goles, buscar columnas separadas
+        # Si no se encontraron goles, buscar columnas GF/GC separadas
         if not goles_encontrados:
             for col in df.columns:
                 c_upper = str(col).upper()
-                if 'GF' in c_upper or 'SCORED' in c_upper or 'FOR' in c_upper:
-                    df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                if 'GC' in c_upper or 'CONCEDED' in c_upper or 'AGAINST' in c_upper:
-                    df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                if 'GF' in c_upper or 'SCORED' in c_upper or ('GOALS' in c_upper and 'FOR' in c_upper):
+                    df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                if 'GC' in c_upper or 'GA' in c_upper or 'CONCEDED' in c_upper or ('GOALS' in c_upper and 'AGAINST' in c_upper):
+                    df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
         
-        # Conversiones seguras
+        # Si aún no hay PJ, intentar contarlo de W+D+L
+        if 'PJ' not in df.columns:
+            if all(x in df.columns for x in ['Victorias', 'Empates', 'Derrotas']):
+                df['PJ'] = df['Victorias'] + df['Empates'] + df['Derrotas']
+        
+        # Conversiones seguras finales
         for col in ['Pts', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC']:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+        
+        # Si PJ sigue sin existir o tiene ceros, usar valor por defecto
+        if 'PJ' not in df.columns or df['PJ'].sum() == 0:
+            df['PJ'] = 10  # Valor asumido para evitar divisiones por cero
         
         return df
 
