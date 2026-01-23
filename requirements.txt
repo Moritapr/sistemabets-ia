@@ -2,7 +2,7 @@ streamlit
 pandas
 numpy
 requests
+cloudscraper
 lxml
 beautifulsoup4
-html5lib
 scikit-learn
