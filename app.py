@@ -2,237 +2,185 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from scipy.stats import poisson
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="SISTEMABETS IA v2.0 - ANÁLISIS PROFUNDO", layout="wide")
+st.set_page_config(page_title="SISTEMABETS IA v3.0 - API PRO", layout="wide")
 
 # ============================================================================
-# MÓDULO 1: EXTRACCIÓN INTELIGENTE DE DATOS
+# MÓDULO 1: CONECTOR API-FOOTBALL
 # ============================================================================
 
-class ScraperMultiSource:
-    """Scraper robusto con fallback y validación de datos"""
+class APIFootball:
+    """Conector profesional a API-Football (RapidAPI)"""
     
-    HEADERS = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    }
+    BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
     
+    # IDs de ligas principales
     LIGAS = {
-        "Champions League": "https://native-stats.org/competition/CL/",
-        "Premier League": "https://native-stats.org/competition/PL",
-        "La Liga": "https://native-stats.org/competition/PD",
-        "Bundesliga": "https://native-stats.org/competition/BL1",
-        "Serie A": "https://native-stats.org/competition/SA",
-        "Ligue 1": "https://native-stats.org/competition/FL1"
+        "Champions League": 2,
+        "Premier League": 39,
+        "La Liga": 140,
+        "Bundesliga": 78,
+        "Serie A": 135,
+        "Ligue 1": 61,
+        "Liga Portugal": 94
     }
     
-    @staticmethod
-    def extraer_tabla_standings(url):
-        """Extrae tabla de posiciones con stats locales/visitantes"""
+    def __init__(self, api_key):
+        self.headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+        }
+    
+    def obtener_standings(self, liga_id, temporada=2024):
+        """Obtiene tabla de posiciones con stats completas"""
         try:
-            response = requests.get(url, headers=ScraperMultiSource.HEADERS, timeout=15)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
+            url = f"{self.BASE_URL}/standings"
+            params = {"league": liga_id, "season": temporada}
             
-            # Buscar todas las tablas
-            tablas_html = soup.find_all('table')
-            if not tablas_html:
-                st.error("No se encontraron tablas en la página")
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            data = response.json()
+            
+            if not data.get('response'):
                 return None
             
-            # Intentar parsear cada tabla hasta encontrar una válida
-            df = None
-            for i, tabla in enumerate(tablas_html):
-                try:
-                    # Parsear tabla individual
-                    dfs = pd.read_html(str(tabla))
-                    if dfs and len(dfs) > 0:
-                        temp_df = dfs[0]
-                        
-                        # Validar que tenga suficientes filas (al menos 5 equipos)
-                        if len(temp_df) >= 5:
-                            df = temp_df
-                            break
-                except Exception as parse_error:
-                    continue
+            standings = data['response'][0]['league']['standings'][0]
             
-            if df is None:
-                st.error("No se pudo parsear ninguna tabla válida")
-                return None
+            # Convertir a DataFrame
+            equipos = []
+            for team in standings:
+                equipos.append({
+                    'Equipo': team['team']['name'],
+                    'PJ': team['all']['played'],
+                    'Victorias': team['all']['win'],
+                    'Empates': team['all']['draw'],
+                    'Derrotas': team['all']['lose'],
+                    'GF': team['all']['goals']['for'],
+                    'GC': team['all']['goals']['against'],
+                    'Pts': team['points'],
+                    # Stats locales
+                    'PJ_Local': team['home']['played'],
+                    'GF_Local': team['home']['goals']['for'],
+                    'GC_Local': team['home']['goals']['against'],
+                    'Victorias_Local': team['home']['win'],
+                    # Stats visitante
+                    'PJ_Visitante': team['away']['played'],
+                    'GF_Visitante': team['away']['goals']['for'],
+                    'GC_Visitante': team['away']['goals']['against'],
+                    'Victorias_Visitante': team['away']['win'],
+                    # Forma
+                    'Forma': team['form']
+                })
             
-            # Resetear índice por si acaso
-            df = df.reset_index(drop=True)
-            
-            # Normalización dinámica de columnas
-            df = ScraperMultiSource._normalizar_columnas(df)
-            
-            # Validar que tenga las columnas mínimas necesarias
-            if 'Equipo' not in df.columns or 'GF' not in df.columns:
-                st.error(f"Columnas encontradas: {list(df.columns)}")
-                st.error("No se encontraron las columnas necesarias (Equipo, GF, GC)")
-                return None
-            
-            return df
+            return pd.DataFrame(equipos)
             
         except Exception as e:
-            st.error(f"Error extrayendo {url}: {str(e)}")
-            import traceback
-            st.error(f"Traceback: {traceback.format_exc()}")
+            st.error(f"Error API: {str(e)}")
             return None
     
-    @staticmethod
-    def _normalizar_columnas(df):
-        """Mapeo inteligente de columnas"""
-        
-        # CRÍTICO: Resetear índice y eliminar duplicados
-        df = df.reset_index(drop=True)
-        
-        # Si viene un MultiIndex, aplanar
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = ['_'.join(map(str, col)).strip() for col in df.columns]
-        
-        # Asegurar que las columnas sean strings únicos
-        df.columns = [str(col) for col in df.columns]
-        
-        # Eliminar columnas duplicadas
-        df = df.loc[:, ~df.columns.duplicated()]
-        
-        cols_map = {}
-        
-        for col in df.columns:
-            c_upper = col.upper()
+    def obtener_pronosticos(self, fixture_id):
+        """Obtiene pronósticos de la API para un partido"""
+        try:
+            url = f"{self.BASE_URL}/predictions"
+            params = {"fixture": fixture_id}
             
-            # Identificación por palabras clave
-            if any(x in c_upper for x in ['TEAM', 'EQUIPO', 'CLUB', 'SQUAD']) and 'Equipo' not in cols_map.values():
-                cols_map[col] = 'Equipo'
-            elif any(x in c_upper for x in ['PTS', 'POINTS', 'PUNTOS']) and 'Pts' not in cols_map.values():
-                cols_map[col] = 'Pts'
-            elif any(x in c_upper for x in ['MP', 'PJ', 'PLAYED', 'MATCHES']) and 'PJ' not in cols_map.values():
-                cols_map[col] = 'PJ'
-            elif any(x in c_upper for x in ['W', 'G', 'WINS', 'WON']) and 'Victorias' not in cols_map.values():
-                cols_map[col] = 'Victorias'
-            elif any(x in c_upper for x in ['D', 'E', 'DRAWS', 'DRAW']) and 'Empates' not in cols_map.values():
-                cols_map[col] = 'Empates'
-            elif any(x in c_upper for x in ['L', 'P', 'LOSS', 'LOST']) and 'Derrotas' not in cols_map.values():
-                cols_map[col] = 'Derrotas'
-        
-        df = df.rename(columns=cols_map)
-        
-        # Si no se mapeó "Equipo", usar la primera columna de texto
-        if 'Equipo' not in df.columns:
-            for col in df.columns:
-                try:
-                    if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
-                        df = df.rename(columns={col: 'Equipo'})
-                        break
-                except:
-                    continue
-        
-        # Limpieza de equipo
-        if 'Equipo' in df.columns:
-            try:
-                df['Equipo'] = df['Equipo'].astype(str).str.replace(r'^\d+\.?\s*', '', regex=True).str.strip()
-                df = df[df['Equipo'].str.len() > 0]
-            except Exception as e:
-                st.warning(f"Advertencia al limpiar equipos: {e}")
-        
-        # Extracción de goles (formato X:Y)
-        goles_encontrados = False
-        for col in df.columns:
-            try:
-                col_str = df[col].astype(str)
-                if col_str.str.contains(':', regex=False).any():
-                    goles = col_str.str.extract(r'(\d+):(\d+)', expand=True)
-                    if goles is not None and len(goles.columns) == 2:
-                        df['GF'] = pd.to_numeric(goles[0], errors='coerce').fillna(0).astype(int)
-                        df['GC'] = pd.to_numeric(goles[1], errors='coerce').fillna(0).astype(int)
-                        goles_encontrados = True
-                        break
-            except Exception as e:
-                continue
-        
-        # Si no se encontraron goles, buscar columnas GF/GC separadas
-        if not goles_encontrados:
-            for col in df.columns:
-                c_upper = str(col).upper()
-                try:
-                    if ('GF' in c_upper or 'SCORED' in c_upper) and 'GF' not in df.columns:
-                        df['GF'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                    if ('GC' in c_upper or 'GA' in c_upper or 'CONCEDED' in c_upper) and 'GC' not in df.columns:
-                        df['GC'] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                except:
-                    continue
-        
-        # Si aún no hay PJ, intentar contarlo de W+D+L
-        if 'PJ' not in df.columns:
-            try:
-                if all(x in df.columns for x in ['Victorias', 'Empates', 'Derrotas']):
-                    df['PJ'] = df['Victorias'] + df['Empates'] + df['Derrotas']
-            except:
-                pass
-        
-        # Conversiones seguras finales
-        for col in ['Pts', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC']:
-            if col in df.columns:
-                try:
-                    # Asegurar que sea una Serie, no DataFrame
-                    if isinstance(df[col], pd.DataFrame):
-                        df[col] = df[col].iloc[:, 0]
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                except Exception as e:
-                    st.warning(f"Error convirtiendo columna {col}: {e}")
-        
-        # Si PJ sigue sin existir o tiene ceros, usar valor por defecto
-        if 'PJ' not in df.columns or df['PJ'].sum() == 0:
-            df['PJ'] = 10
-        
-        return df
-
-# ============================================================================
-# MÓDULO 2: MOTOR DE ANÁLISIS AVANZADO
-# ============================================================================
-
-class AnalizadorPartidos:
-    """Motor de IA que calcula probabilidades reales basadas en múltiples factores"""
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            data = response.json()
+            
+            if data.get('response'):
+                return data['response'][0]['predictions']
+            return None
+            
+        except Exception as e:
+            return None
     
-    VENTAJA_LOCAL = 1.18  # Basado en stats históricas reales
+    def obtener_cuotas(self, fixture_id):
+        """Obtiene cuotas de casas de apuestas para un partido"""
+        try:
+            url = f"{self.BASE_URL}/odds"
+            params = {"fixture": fixture_id}
+            
+            response = requests.get(url, headers=self.headers, params=params, timeout=10)
+            data = response.json()
+            
+            if data.get('response'):
+                return data['response'][0]['bookmakers']
+            return None
+            
+        except Exception as e:
+            return None
+
+# ============================================================================
+# MÓDULO 2: ANALIZADOR AVANZADO
+# ============================================================================
+
+class AnalizadorAvanzado:
+    """Motor de análisis con stats locales/visitantes separadas"""
+    
+    VENTAJA_LOCAL = 1.18
     
     @staticmethod
-    def calcular_lambdas(equipo_local, equipo_visitante, df_liga):
+    def calcular_lambdas_avanzado(local, visitante, df_liga):
         """
-        Calcula expectativa de goles (lambda) ajustada por:
-        - Potencia ofensiva del equipo
-        - Debilidad defensiva del rival
-        - Ventaja de jugar en casa
-        - Normalización por media de liga
+        Calcula lambdas usando stats específicas de local/visitante
+        Esto es MUCHO más preciso que usar stats generales
         """
         
-        # Stats del equipo local
-        gf_local = equipo_local['GF'] / max(equipo_local['PJ'], 1)
-        gc_visitante = equipo_visitante['GC'] / max(equipo_visitante['PJ'], 1)
+        # Potencia ofensiva del local EN CASA
+        gf_local_casa = local['GF_Local'] / max(local['PJ_Local'], 1)
         
-        # Stats del equipo visitante
-        gf_visitante = equipo_visitante['GF'] / max(equipo_visitante['PJ'], 1)
-        gc_local = equipo_local['GC'] / max(equipo_local['PJ'], 1)
+        # Debilidad defensiva del visitante FUERA
+        gc_visitante_fuera = visitante['GC_Visitante'] / max(visitante['PJ_Visitante'], 1)
         
-        # Media de goles de la liga
-        media_gf = df_liga['GF'].sum() / df_liga['PJ'].sum()
-        media_gc = df_liga['GC'].sum() / df_liga['PJ'].sum()
+        # Potencia ofensiva del visitante FUERA
+        gf_visitante_fuera = visitante['GF_Visitante'] / max(visitante['PJ_Visitante'], 1)
         
-        # Lambda ajustado
-        lambda_local = (gf_local * (gc_visitante / media_gc)) * AnalizadorPartidos.VENTAJA_LOCAL
-        lambda_visitante = (gf_visitante * (gc_local / media_gc)) / AnalizadorPartidos.VENTAJA_LOCAL
+        # Debilidad defensiva del local EN CASA
+        gc_local_casa = local['GC_Local'] / max(local['PJ_Local'], 1)
+        
+        # Medias de la liga
+        media_gf = df_liga['GF'].mean() / df_liga['PJ'].mean()
+        
+        # Lambdas ajustados
+        lambda_local = (gf_local_casa / media_gf) * gc_visitante_fuera * AnalizadorAvanzado.VENTAJA_LOCAL
+        lambda_visitante = (gf_visitante_fuera / media_gf) * gc_local_casa / AnalizadorAvanzado.VENTAJA_LOCAL
         
         return lambda_local, lambda_visitante
     
     @staticmethod
-    def matriz_probabilidades(lambda_l, lambda_v, max_goles=6):
-        """Genera matriz de probabilidades para todos los resultados posibles"""
+    def analizar_forma(forma_str):
+        """Analiza la racha reciente (formato: 'WWDLW')"""
+        if not forma_str or forma_str == 'None':
+            return 0.5
+        
+        puntos = {'W': 1.0, 'D': 0.5, 'L': 0.0}
+        ultimos = forma_str[-5:]  # Últimos 5 partidos
+        
+        # Peso exponencial: último partido vale más
+        pesos = [0.1, 0.15, 0.2, 0.25, 0.3]
+        
+        score = sum(puntos.get(r, 0.5) * w for r, w in zip(ultimos, pesos))
+        return score
+    
+    @staticmethod
+    def ajustar_por_forma(lambda_val, forma):
+        """Ajusta lambda según la forma reciente"""
+        forma_score = AnalizadorAvanzado.analizar_forma(forma)
+        
+        # Ajuste: forma excelente +15%, forma mala -15%
+        if forma_score > 0.7:
+            return lambda_val * 1.15
+        elif forma_score < 0.3:
+            return lambda_val * 0.85
+        else:
+            return lambda_val
+    
+    @staticmethod
+    def matriz_probabilidades(lambda_l, lambda_v, max_goles=7):
+        """Genera matriz de probabilidades"""
         matriz = np.zeros((max_goles, max_goles))
         
         for i in range(max_goles):
@@ -242,120 +190,166 @@ class AnalizadorPartidos:
         return matriz
     
     @staticmethod
-    def mercados_principales(matriz):
-        """Calcula probabilidades de los mercados principales"""
+    def calcular_mercados(matriz):
+        """Calcula todos los mercados principales"""
         
         # 1X2
-        p_local = np.sum(np.tril(matriz, -1))  # Debajo de diagonal
-        p_empate = np.sum(np.diag(matriz))     # Diagonal
-        p_visitante = np.sum(np.triu(matriz, 1))  # Arriba de diagonal
+        p_local = np.sum(np.tril(matriz, -1))
+        p_empate = np.sum(np.diag(matriz))
+        p_visitante = np.sum(np.triu(matriz, 1))
         
-        # Over/Under 2.5
-        p_under_25 = sum([matriz[i, j] for i in range(6) for j in range(6) if i+j < 3])
-        p_over_25 = 1 - p_under_25
+        # Over/Under
+        over_under = {}
+        for threshold in [0.5, 1.5, 2.5, 3.5, 4.5]:
+            total = int(threshold) + 1
+            p_under = sum([matriz[i, j] for i in range(matriz.shape[0]) 
+                          for j in range(matriz.shape[1]) if i+j < total])
+            over_under[f"Over {threshold}"] = 1 - p_under
+            over_under[f"Under {threshold}"] = p_under
         
-        # Over/Under 1.5
-        p_under_15 = matriz[0,0] + matriz[0,1] + matriz[1,0]
-        p_over_15 = 1 - p_under_15
-        
-        # Over/Under 3.5
-        p_under_35 = sum([matriz[i, j] for i in range(6) for j in range(6) if i+j < 4])
-        p_over_35 = 1 - p_under_35
-        
-        # BTTS (Ambos marcan)
+        # BTTS
         p_btts_no = matriz[0,:].sum() + matriz[:,0].sum() - matriz[0,0]
         p_btts_si = 1 - p_btts_no
         
         # Resultado exacto más probable
         idx_max = np.unravel_index(matriz.argmax(), matriz.shape)
-        resultado_mas_probable = f"{idx_max[0]}-{idx_max[1]}"
-        prob_resultado = matriz[idx_max[0], idx_max[1]]
         
         return {
             '1X2': {'Local': p_local, 'Empate': p_empate, 'Visitante': p_visitante},
-            'Over/Under': {
-                'Over 1.5': p_over_15,
-                'Over 2.5': p_over_25,
-                'Over 3.5': p_over_35
-            },
+            'Over/Under': over_under,
             'BTTS': {'Si': p_btts_si, 'No': p_btts_no},
-            'Resultado': resultado_mas_probable,
-            'Prob_Resultado': prob_resultado
+            'Resultado_Exacto': f"{idx_max[0]}-{idx_max[1]}",
+            'Prob_Exacto': matriz[idx_max[0], idx_max[1]]
         }
-    
-    @staticmethod
-    def calcular_valor_esperado(probabilidad, cuota):
-        """Calcula el valor esperado de una apuesta (EV)"""
-        ev = (probabilidad * cuota) - 1
-        return ev * 100  # En porcentaje
 
 # ============================================================================
-# MÓDULO 3: BUSCADOR DE VALOR (VALUE BETTING)
+# MÓDULO 3: BUSCADOR DE VALOR
 # ============================================================================
 
 class BuscadorValor:
-    """Identifica apuestas con valor positivo comparando probabilidades vs cuotas"""
-    
-    MARGEN_MINIMO = 5  # EV mínimo para considerar una apuesta
+    """Identifica apuestas con valor esperado positivo"""
     
     @staticmethod
-    def analizar_lineas(mercados, cuotas_sugeridas):
-        """
-        Compara probabilidades calculadas con cuotas del mercado
-        para encontrar oportunidades de valor
-        """
+    def calcular_ev(probabilidad, cuota):
+        """Valor Esperado = (Prob × Cuota) - 1"""
+        return (probabilidad * cuota - 1) * 100
+    
+    @staticmethod
+    def encontrar_oportunidades(mercados, margen_minimo=5):
+        """Busca las mejores oportunidades"""
         
         oportunidades = []
         
-        # Cuotas implícitas (ejemplo - en producción vienen del scraper de casas)
-        for mercado, probs in mercados.items():
-            if mercado == 'Resultado' or mercado == 'Prob_Resultado':
-                continue
-                
-            for tipo, prob in probs.items():
-                # Cuota justa (sin margen de casa)
+        # 1X2
+        for tipo, prob in mercados['1X2'].items():
+            cuota_justa = 1 / prob if prob > 0 else 999
+            cuota_mercado = cuota_justa * 0.92  # Margen típico 8%
+            ev = BuscadorValor.calcular_ev(prob, cuota_mercado)
+            
+            if ev >= margen_minimo:
+                oportunidades.append({
+                    'Mercado': f"1X2 - {tipo}",
+                    'Probabilidad': f"{prob*100:.1f}%",
+                    'Cuota_Justa': f"{cuota_justa:.2f}",
+                    'EV': f"{ev:.1f}%",
+                    'Confianza': '🔥' if prob > 0.6 else '⚡' if prob > 0.45 else '💡'
+                })
+        
+        # Over/Under 2.5
+        for tipo, prob in mercados['Over/Under'].items():
+            if '2.5' in tipo or '1.5' in tipo:
                 cuota_justa = 1 / prob if prob > 0 else 999
+                cuota_mercado = cuota_justa * 0.92
+                ev = BuscadorValor.calcular_ev(prob, cuota_mercado)
                 
-                # Simulamos cuota de mercado (en real se scrapea)
-                cuota_mercado = cuota_justa * 0.92  # Margen típico 8%
-                
-                # Valor esperado
-                ev = AnalizadorPartidos.calcular_valor_esperado(prob, cuota_mercado)
-                
-                if ev >= BuscadorValor.MARGEN_MINIMO:
+                if ev >= margen_minimo:
                     oportunidades.append({
-                        'Mercado': f"{mercado} - {tipo}",
+                        'Mercado': tipo,
                         'Probabilidad': f"{prob*100:.1f}%",
                         'Cuota_Justa': f"{cuota_justa:.2f}",
-                        'Cuota_Mercado': f"{cuota_mercado:.2f}",
-                        'Valor_Esperado': f"{ev:.1f}%",
-                        'Confianza': '🔥' if ev > 10 else '⚡' if ev > 7 else '💡'
+                        'EV': f"{ev:.1f}%",
+                        'Confianza': '🔥' if prob > 0.6 else '⚡'
                     })
         
-        return sorted(oportunidades, key=lambda x: float(x['Valor_Esperado'].replace('%','')), reverse=True)
+        # BTTS
+        for tipo, prob in mercados['BTTS'].items():
+            cuota_justa = 1 / prob if prob > 0 else 999
+            cuota_mercado = cuota_justa * 0.92
+            ev = BuscadorValor.calcular_ev(prob, cuota_mercado)
+            
+            if ev >= margen_minimo:
+                oportunidades.append({
+                    'Mercado': f"BTTS - {tipo}",
+                    'Probabilidad': f"{prob*100:.1f}%",
+                    'Cuota_Justa': f"{cuota_justa:.2f}",
+                    'EV': f"{ev:.1f}%",
+                    'Confianza': '🔥' if prob > 0.55 else '⚡'
+                })
+        
+        return sorted(oportunidades, key=lambda x: float(x['EV'].replace('%','')), reverse=True)
 
 # ============================================================================
-# INTERFAZ PRINCIPAL
+# INTERFAZ
 # ============================================================================
 
 def main():
-    st.title("⚡ SISTEMABETS IA v2.0 - ANÁLISIS PROFESIONAL")
-    st.caption("Motor de análisis probabilístico con detección automática de valor")
+    st.title("⚡ SISTEMABETS IA v3.0 - ANÁLISIS PROFESIONAL")
+    st.caption("Powered by API-Football | Datos en tiempo real")
     
-    # Sidebar
-    st.sidebar.header("⚙️ Configuración")
-    liga_seleccionada = st.sidebar.selectbox("Liga:", list(ScraperMultiSource.LIGAS.keys()))
+    # Sidebar - Configuración API
+    st.sidebar.header("🔑 Configuración API")
     
-    # Carga de datos
-    with st.spinner(f"Extrayendo datos de {liga_seleccionada}..."):
-        df = ScraperMultiSource.extraer_tabla_standings(ScraperMultiSource.LIGAS[liga_seleccionada])
+    api_key = st.sidebar.text_input(
+        "API Key (RapidAPI)", 
+        type="password",
+        help="Obtén tu key gratis en: https://rapidapi.com/api-sports/api/api-football"
+    )
     
-    if df is None or df.empty:
-        st.error("❌ No se pudieron cargar los datos. Verifica la conexión.")
+    if not api_key:
+        st.warning("⚠️ **Necesitas una API Key para empezar**")
+        st.info("""
+        ### Cómo obtener tu API Key GRATIS:
+        
+        1. Ve a https://rapidapi.com/api-sports/api/api-football
+        2. Crea una cuenta (gratis)
+        3. Suscríbete al plan GRATUITO (100 requests/día)
+        4. Copia tu API Key y pégala arriba
+        
+        **Sin tarjeta de crédito. 100% gratis.**
+        """)
+        
+        st.markdown("---")
+        st.subheader("🎯 ¿Por qué usar esta API?")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("✅ Datos de 1000+ ligas")
+            st.write("✅ Stats locales/visitantes")
+            st.write("✅ Forma reciente de equipos")
+            st.write("✅ Head-to-Head histórico")
+        
+        with col2:
+            st.write("✅ Cuotas en tiempo real")
+            st.write("✅ Lesiones y suspensiones")
+            st.write("✅ Pronósticos profesionales")
+            st.write("✅ JSON limpio (sin scraping)")
+        
         return
     
-    if 'GF' not in df.columns or 'Equipo' not in df.columns:
-        st.error("❌ Formato de datos incorrecto. La fuente cambió su estructura.")
+    # Inicializar API
+    api = APIFootball(api_key)
+    
+    # Selección de liga
+    liga_nombre = st.sidebar.selectbox("Liga:", list(APIFootball.LIGAS.keys()))
+    liga_id = APIFootball.LIGAS[liga_nombre]
+    temporada = st.sidebar.selectbox("Temporada:", [2024, 2023], index=0)
+    
+    # Cargar datos
+    with st.spinner(f"Cargando datos de {liga_nombre}..."):
+        df = api.obtener_standings(liga_id, temporada)
+    
+    if df is None or df.empty:
+        st.error("❌ Error cargando datos. Verifica tu API Key y límite de requests.")
         return
     
     st.success(f"✅ {len(df)} equipos cargados | Última actualización: {datetime.now().strftime('%H:%M:%S')}")
@@ -367,39 +361,40 @@ def main():
     equipos = sorted(df['Equipo'].unique())
     
     with col1:
-        equipo_local_nombre = st.selectbox("🏟️ Equipo Local:", equipos, index=0)
+        equipo_local = st.selectbox("🏟️ Local:", equipos, index=0)
     
     with col2:
-        equipo_visitante_nombre = st.selectbox("✈️ Equipo Visitante:", equipos, 
-                                                index=min(1, len(equipos)-1))
+        equipo_visitante = st.selectbox("✈️ Visitante:", equipos, index=min(1, len(equipos)-1))
     
-    if equipo_local_nombre == equipo_visitante_nombre:
+    if equipo_local == equipo_visitante:
         st.warning("⚠️ Selecciona dos equipos diferentes")
         return
     
     # Obtener stats
-    el = df[df['Equipo'] == equipo_local_nombre].iloc[0]
-    ev = df[df['Equipo'] == equipo_visitante_nombre].iloc[0]
+    el = df[df['Equipo'] == equipo_local].iloc[0]
+    ev = df[df['Equipo'] == equipo_visitante].iloc[0]
     
-    # Análisis
+    # ANÁLISIS
     if st.button("🔍 ANALIZAR PARTIDO", type="primary", use_container_width=True):
         
         with st.spinner("Calculando probabilidades..."):
-            # Lambdas
-            lambda_l, lambda_v = AnalizadorPartidos.calcular_lambdas(el, ev, df)
+            # Lambdas con stats locales/visitantes
+            lambda_l, lambda_v = AnalizadorAvanzado.calcular_lambdas_avanzado(el, ev, df)
             
-            # Matriz
-            matriz = AnalizadorPartidos.matriz_probabilidades(lambda_l, lambda_v)
+            # Ajuste por forma
+            lambda_l = AnalizadorAvanzado.ajustar_por_forma(lambda_l, el['Forma'])
+            lambda_v = AnalizadorAvanzado.ajustar_por_forma(lambda_v, ev['Forma'])
             
-            # Mercados
-            mercados = AnalizadorPartidos.mercados_principales(matriz)
+            # Matriz y mercados
+            matriz = AnalizadorAvanzado.matriz_probabilidades(lambda_l, lambda_v)
+            mercados = AnalizadorAvanzado.calcular_mercados(matriz)
             
             # Búsqueda de valor
-            oportunidades = BuscadorValor.analizar_lineas(mercados, None)
+            oportunidades = BuscadorValor.encontrar_oportunidades(mercados)
         
         # ============ RESULTADOS ============
         st.divider()
-        st.subheader("📊 RESULTADOS DEL ANÁLISIS")
+        st.subheader("📊 ANÁLISIS COMPLETO")
         
         # Métricas principales
         m1, m2, m3, m4 = st.columns(4)
@@ -409,56 +404,57 @@ def main():
         m4.metric("⚽ Goles Esperados", f"{lambda_l + lambda_v:.2f}")
         
         # Over/Under
-        st.subheader("📈 Análisis Over/Under")
+        st.subheader("📈 Over/Under")
         ou1, ou2, ou3 = st.columns(3)
         ou1.metric("Over 1.5", f"{mercados['Over/Under']['Over 1.5']*100:.1f}%")
         ou2.metric("Over 2.5", f"{mercados['Over/Under']['Over 2.5']*100:.1f}%")
         ou3.metric("Over 3.5", f"{mercados['Over/Under']['Over 3.5']*100:.1f}%")
         
         # BTTS
-        st.subheader("🎯 Ambos Marcan (BTTS)")
+        st.subheader("🎯 Ambos Marcan")
         bt1, bt2 = st.columns(2)
-        bt1.metric("BTTS Sí", f"{mercados['BTTS']['Si']*100:.1f}%", 
-                   delta="Alta confianza" if mercados['BTTS']['Si'] > 0.6 else None)
+        bt1.metric("BTTS Sí", f"{mercados['BTTS']['Si']*100:.1f}%")
         bt2.metric("BTTS No", f"{mercados['BTTS']['No']*100:.1f}%")
         
         # Resultado más probable
-        st.info(f"🎲 **Resultado más probable:** {mercados['Resultado']} ({mercados['Prob_Resultado']*100:.1f}%)")
+        st.info(f"🎲 **Resultado más probable:** {mercados['Resultado_Exacto']} ({mercados['Prob_Exacto']*100:.1f}%)")
         
-        # Oportunidades de valor
+        # Oportunidades
         st.divider()
-        st.subheader("💎 MEJORES OPORTUNIDADES DE VALOR")
+        st.subheader("💎 MEJORES OPORTUNIDADES")
         
         if oportunidades:
             df_oport = pd.DataFrame(oportunidades)
             st.dataframe(df_oport, use_container_width=True, hide_index=True)
         else:
-            st.warning("No se encontraron oportunidades con EV > 5%")
+            st.warning("No hay oportunidades con EV > 5% en este partido")
         
-        # Datos técnicos
-        with st.expander("🔬 Ver datos técnicos"):
+        # Stats técnicas
+        with st.expander("🔬 Ver análisis técnico"):
             tc1, tc2 = st.columns(2)
             
             with tc1:
-                st.write(f"**{equipo_local_nombre}**")
-                st.write(f"- Goles a favor: {int(el['GF'])}")
-                st.write(f"- Goles en contra: {int(el['GC'])}")
-                st.write(f"- Partidos jugados: {int(el['PJ'])}")
-                st.write(f"- Promedio goles/partido: {el['GF']/max(el['PJ'],1):.2f}")
+                st.write(f"**{equipo_local} (Local)**")
+                st.write(f"- Forma: {el['Forma']}")
+                st.write(f"- Goles en casa: {int(el['GF_Local'])} en {int(el['PJ_Local'])} PJ")
+                st.write(f"- Promedio casa: {el['GF_Local']/max(el['PJ_Local'],1):.2f} goles/partido")
                 st.write(f"- Lambda calculado: {lambda_l:.2f}")
             
             with tc2:
-                st.write(f"**{equipo_visitante_nombre}**")
-                st.write(f"- Goles a favor: {int(ev['GF'])}")
-                st.write(f"- Goles en contra: {int(ev['GC'])}")
-                st.write(f"- Partidos jugados: {int(ev['PJ'])}")
-                st.write(f"- Promedio goles/partido: {ev['GF']/max(ev['PJ'],1):.2f}")
+                st.write(f"**{equipo_visitante} (Visitante)**")
+                st.write(f"- Forma: {ev['Forma']}")
+                st.write(f"- Goles fuera: {int(ev['GF_Visitante'])} en {int(ev['PJ_Visitante'])} PJ")
+                st.write(f"- Promedio fuera: {ev['GF_Visitante']/max(ev['PJ_Visitante'],1):.2f} goles/partido")
                 st.write(f"- Lambda calculado: {lambda_v:.2f}")
         
-        # Tabla de clasificación
-        with st.expander("📋 Ver clasificación completa"):
-            st.dataframe(df[['Equipo', 'PJ', 'GF', 'GC', 'Pts']].sort_values('Pts', ascending=False),
-                        use_container_width=True, hide_index=True)
+        # Tabla completa
+        with st.expander("📋 Ver clasificación"):
+            st.dataframe(
+                df[['Equipo', 'PJ', 'Victorias', 'Empates', 'Derrotas', 'GF', 'GC', 'Pts', 'Forma']]
+                .sort_values('Pts', ascending=False),
+                use_container_width=True,
+                hide_index=True
+            )
 
 if __name__ == "__main__":
     main()
