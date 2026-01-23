@@ -2,87 +2,75 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
+import requests
 
-# --- 1. CONFIGURACIÓN DE PÁGINA Y ESTILO NEÓN ---
-st.set_page_config(page_title="SISTEMABETS IA ELITE", page_icon="🤖", layout="wide")
+# --- CONFIGURACIÓN Y ESTILO ---
+st.set_page_config(page_title="SISTEMABETS IA: LIVE SCRAPER", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
-    [data-testid="stMetricValue"] { font-size: 1.8rem; color: #00ffcc; font-weight: bold; }
+    [data-testid="stMetricValue"] { color: #00ffcc; font-weight: bold; }
     .stMetric { background-color: #1a1c23; padding: 15px; border-radius: 15px; border: 1px solid #333; }
-    h1, h2, h3 { color: #00ffcc; }
-    .stSelectbox div[data-baseweb="select"] { background-color: #1a1c23; border: 1px solid #00ffcc; }
-    hr { border: 0; height: 1px; background-image: linear-gradient(to right, rgba(0, 255, 204, 0), rgba(0, 255, 204, 0.7), rgba(0, 255, 204, 0)); }
-    .elite-text { color: #ff4b4b; font-weight: bold; font-size: 1.2rem; margin-bottom: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MOTOR DE IA ---
-@st.cache_resource
-def entrenar_ia():
-    X = np.random.uniform(1, 10, (1000, 3))
-    y = (X[:, 0] * 0.4) + (X[:, 1] * 0.05) + np.random.normal(0, 0.1, 1000)
-    modelo = RandomForestRegressor(n_estimators=100, random_state=42)
-    modelo.fit(X, y)
-    return modelo
+# --- SCRAPER REAL DE FBREF ---
+@st.cache_data(ttl=3600) # Guarda los datos por 1 hora para no saturar
+def extraer_datos_vivos():
+    try:
+        # URL de estadísticas de disparos de la Champions 25/26
+        url = "https://fbref.com/en/comps/8/shooting/Champions-League-Stats"
+        html = requests.get(url).text
+        # Leemos las tablas y buscamos la de 'stats_shooting_combined'
+        tablas = pd.read_html(html)
+        df = tablas[0]
+        
+        # Limpieza de columnas (FBref usa multinivel)
+        df.columns = [' '.join(col).strip() for col in df.columns.values]
+        
+        # Nos quedamos con: Equipo, Disparos a puerta (SoT) y SoT por 90
+        # Los nombres exactos de columnas en FBref suelen ser 'Unnamed: 0_level_0 Squad' y 'Standard SoT/90'
+        df_clean = df[['Unnamed: 0_level_0 Squad', 'Standard SoT/90']].copy()
+        df_clean.columns = ['Squad', 'SoT90']
+        
+        # Convertimos a diccionario para la IA
+        return df_clean.set_index('Squad')['SoT90'].to_dict()
+    except Exception as e:
+        st.error(f"Error al conectar con FBref: {e}")
+        return {"Error": 0}
 
-def obtener_db():
-    return {
-        'Real Madrid': {'sot': 7.4, 'gf': 2.3, 'cards': 1.6},
-        'Barça': {'sot': 8.1, 'gf': 2.1, 'cards': 2.2},
-        'Man City': {'sot': 8.5, 'gf': 2.5, 'cards': 1.4},
-        'Arsenal': {'sot': 7.2, 'gf': 2.0, 'cards': 1.8},
-        'Napoli': {'sot': 5.4, 'gf': 1.8, 'cards': 2.1},
-        'Chelsea': {'sot': 4.8, 'gf': 1.4, 'cards': 2.5},
-        'Slavia Prague': {'sot': 3.9, 'gf': 2.1, 'cards': 1.8},
-        'Bayern': {'sot': 7.8, 'gf': 2.6, 'cards': 1.5}
-    }
+# --- PROCESAMIENTO IA ---
+data_viva = extraer_datos_vivos()
 
-modelo_ia = entrenar_ia()
-db = obtener_db()
+if "Error" not in data_viva:
+    st.title("🤖 IA CONNECTED: FBREF LIVE DATA")
+    st.success(f"Se han extraído {len(data_viva)} equipos reales de la Champions 25/26.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        local = st.selectbox("Selecciona Local:", sorted(data_viva.keys()))
+    with col2:
+        visita = st.selectbox("Selecciona Visita:", sorted(data_viva.keys()))
 
-# --- 3. INTERFAZ ---
-st.title("🤖 SISTEMABETS IA: V4 ELITE")
-st.write(f"Análisis activo para Alejandro - {pd.to_datetime('today').strftime('%d/%m/%Y')}")
+    # --- MODELO RANDOM FOREST ---
+    # La IA ahora usa el SoT90 real que acaba de leer de la web
+    sot_l = float(data_viva[local])
+    sot_v = float(data_viva[visita])
+    
+    # Simulación de entrenamiento flash
+    X = np.array([[5, 2], [8, 1], [3, 4], [7, 2]]) # Datos base de entrenamiento
+    y = [1.5, 2.8, 0.8, 2.1]
+    model = RandomForestRegressor(n_estimators=100).fit(X, y)
+    
+    pred = model.predict([[sot_l, sot_v]])[0]
+    prob = min(99.0, (pred / (pred + 1.2)) * 100)
 
-col_l, col_v = st.columns(2)
-with col_l:
-    local = st.selectbox("Equipo Local:", list(db.keys()), index=0)
-with col_v:
-    visita = st.selectbox("Equipo Visitante:", list(db.keys()), index=4)
-
-# Predicción
-input_data = np.array([[db[local]['sot'], db[visita]['sot'], 1]])
-pred_goles = modelo_ia.predict(input_data)[0]
-prob_win = min(98.2, (pred_goles / (pred_goles + 1.1)) * 100)
-
-st.divider()
-
-# Aquí corregimos el error de las comillas usando comillas simples por fuera
-st.markdown('<p class="elite-text">🟢 SECCIÓN ÉLITE (Aseguradoras)</p>', unsafe_allow_html=True)
-
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.metric("Over 1.5 Goles", f"{round(min(99.1, prob_win+10), 1)}%", "CM: 1.01")
-with c2:
-    st.metric("Over 7.1 Remates", f"{round(min(92.0, (db[local]['sot']+db[visita]['sot'])*8), 1)}%", "CM: 1.09")
-with c3:
-    st.metric("BTTS (Ambos Marcan)", f"{round(min(89.0, prob_win-5), 1)}%", "CM: 1.12")
-
-st.markdown("### 🟡 BUSCADOR DE VALOR")
-v1, v2, v3 = st.columns(3)
-with v1:
-    st.metric(f"Gana {local}", f"{round(prob_win, 1)}%", f"CM: {round(100/prob_win, 2)}")
-with v2:
-    st.metric("Más Tarjetas", visita if db[visita]['cards'] > db[local]['cards'] else local, "Prob: 70%")
-with v3:
-    st.metric("Rango de Goles", "2-4 Goles", "Prob: 78%")
-
-st.divider()
-st.subheader("🧠 Veredicto de la IA")
-if prob_win > 75:
-    st.success(f"🎯 PICK ÉLITE: Superioridad masiva de {local}. Victoria simple o Hándicap.")
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"Prob. {local}", f"{round(prob, 1)}%")
+    c2.metric("SoT/90 Real (Web)", sot_l)
+    c3.metric("Cuota Sugerida", round(100/prob, 2))
 else:
-    st.info("📊 ESCENARIO TRABADO: Se recomienda mercado de Tarjetas o esperar a LIVE.")
+    st.warning("Usando modo offline. Revisa tu conexión o el requirements.txt")
 
