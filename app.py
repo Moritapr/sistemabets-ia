@@ -5,94 +5,92 @@ from bs4 import BeautifulSoup
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 
-# --- CONFIGURACIÓN DE PANTALLA ---
-st.set_page_config(page_title="SISTEMABETS IA: MULTI-SOURCE", layout="wide")
+# --- CONFIGURACIÓN DEL SISTEMA ---
+st.set_page_config(page_title="SISTEMABETS IA: CORE CENTRAL", layout="wide")
 
-# Mapeo de tus links a categorías
-LINKS_DICT = {
-    "Champions League (CL)": "https://native-stats.org/competition/CL/standings",
-    "Premier League (PL)": "https://native-stats.org/competition/PL/standings",
-    "La Liga (PD)": "https://native-stats.org/competition/PD/standings",
-    "Ligue 1 (FL1)": "https://native-stats.org/competition/FL1/standings",
-    "Bundesliga (BL1)": "https://native-stats.org/competition/BL1/standings",
-    "Serie A (SA)": "https://native-stats.org/competition/SA/standings",
-    "Liga Portugal (PPL)": "https://native-stats.org/competition/PPL/standings"
+# Mapeo de tus links
+FUENTES = {
+    "Champions League": "https://native-stats.org/competition/CL/standings",
+    "Premier League": "https://native-stats.org/competition/PL/standings",
+    "La Liga (España)": "https://native-stats.org/competition/PD/standings",
+    "Bundesliga": "https://native-stats.org/competition/BL1/standings",
+    "Serie A": "https://native-stats.org/competition/SA/standings",
+    "Ligue 1": "https://native-stats.org/competition/FL1/standings",
+    "Liga Portugal": "https://native-stats.org/competition/PPL/standings",
+    "Betting Trends": "https://native-stats.org/betting"
 }
 
 @st.cache_data(ttl=1800)
-def succión_inteligente(url):
+def scraper_inteligente(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
-        tabla = soup.find('table')
-        df = pd.read_html(str(tabla))[0]
+        tablas = soup.find_all('table')
         
-        # Estandarización de columnas para la IA
-        df.columns = ['Pos', 'Equipo', 'PJ', 'Pts', 'Dif', 'Goles', 'Extra']
+        # Leemos la tabla principal de la liga
+        df = pd.read_html(str(tablas[0]))[0]
+        
+        # Estandarizamos columnas (Pos, Equipo, PJ, Pts, Dif, Goles)
+        df.columns = ['Pos', 'Equipo', 'PJ', 'Pts', 'Dif', 'Goles', 'Forma']
+        
+        # Procesamos la columna Goles (20:5) para IA
         df[['GF', 'GC']] = df['Goles'].str.split(':', expand=True).astype(int)
-        df['Equipo'] = df['Equipo'].str.replace(r'[0-9]+', '', regex=True).strip()
+        
+        # Limpieza de nombres de equipos (quitar números de posición)
+        df['Equipo'] = df['Equipo'].str.replace(r'\d+', '', regex=True).str.strip()
+        
         return df
     except Exception as e:
-        return f"Error en link: {str(e)}"
+        return f"Error en fuente: {str(e)}"
 
-# --- INTERFAZ CENTRAL ---
-st.title("🤖 IA SISTEMABETS: CENTRAL DE DATOS")
-st.sidebar.header("Configuración de Fuentes")
-liga_seleccionada = st.sidebar.selectbox("Selecciona Competición:", list(LINKS_DICT.keys()))
+# --- INTERFAZ ---
+st.sidebar.title("🔍 FUENTES DE DATOS")
+seleccion = st.sidebar.selectbox("Selecciona Link para Scrapping:", list(FUENTES.keys()))
 
-st.write(f"### Analizando: {liga_seleccionada}")
-url_actual = LINKS_DICT[liga_seleccionada]
+st.title(f"🤖 SISTEMABETS IA: MODO {seleccion.upper()}")
 
-df = succión_inteligente(url_actual)
+df = scraper_inteligente(FUENTES[seleccion])
 
 if isinstance(df, str):
     st.error(df)
 else:
-    st.success(f"✅ Datos sincronizados: {len(df)} equipos detectados.")
+    st.success(f"✅ IA conectada exitosamente a: {FUENTES[seleccion]}")
     
-    # Selectores para el duelo
+    # Análisis comparativo
     c1, c2 = st.columns(2)
-    local = c1.selectbox("Equipo Local:", df['Equipo'].unique(), index=0)
-    visita = c2.selectbox("Equipo Visitante:", df['Equipo'].unique(), index=1)
+    local = c1.selectbox("Local:", df['Equipo'].unique(), index=0)
+    visita = c2.selectbox("Visita:", df['Equipo'].unique(), index=1)
 
-    # --- MOTOR DE IA MULTIVARIABLE ---
-    # Extraemos filas de datos
-    data_l = df[df['Equipo'] == local].iloc[0]
-    data_v = df[df['Equipo'] == visita].iloc[0]
+    # --- MOTOR DE PREDICCIÓN (IA ACCEDE Y BUSCA) ---
+    stats_l = df[df['Equipo'] == local].iloc[0]
+    stats_v = df[df['Equipo'] == visita].iloc[0]
 
-    # Preparamos entrenamiento basado en la tabla completa
+    # La IA usa GF, GC, Puntos y Dif para crear el pronóstico
     X = df[['GF', 'GC', 'Pts', 'Dif']].values
-    y = np.arange(len(df), 0, -1) # Ranking de poder
+    y = np.arange(len(df), 0, -1) # Ranking de poder inverso
     
     model = RandomForestRegressor(n_estimators=100, random_state=42).fit(X, y)
     
-    # Predicción de Probabilidades
-    pred_l = model.predict([[data_l['GF'], data_l['GC'], data_l['Pts'], data_l['Dif']]])[0]
-    pred_v = model.predict([[data_v['GF'], data_v['GC'], data_v['Pts'], data_v['Dif']]])[0]
+    # Predicción de cuotas y probabilidades
+    p_l = model.predict([[stats_l['GF'], stats_l['GC'], stats_l['Pts'], stats_l['Dif']]])[0]
+    p_v = model.predict([[stats_v['GF'], stats_v['GC'], stats_v['Pts'], stats_v['Dif']]])[0]
     
-    prob_l = (pred_l / (pred_l + pred_v)) * 100
+    prob_l = (p_l / (p_l + p_v)) * 100
 
-    # --- DASHBOARD DE RESULTADOS ---
+    # --- DASHBOARD ---
     st.divider()
-    res1, res2, res3 = st.columns(3)
-    res1.metric(f"Victoria {local}", f"{round(prob_l, 1)}%")
-    res2.metric(f"Victoria {visita}", f"{round(100-prob_l, 1)}%")
-    res3.metric("Cuota Fair", f"{round(100/prob_l, 2)}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Victoria {local}", f"{round(prob_l, 1)}%", f"Goles: {stats_l['GF']}")
+    m2.metric(f"Victoria {visita}", f"{round(100-prob_l, 1)}%", f"Goles: {stats_v['GF']}")
+    m3.metric("Cuota Fair", f"{round(100/prob_l, 2)}")
 
-    # Sección de Betting Stats (Inspirado en tu link /betting)
-    st.subheader("📊 Análisis de Mercado (Betting Insights)")
-    b1, b2 = st.columns(2)
+    # Módulo de "Betting" integrado
+    st.subheader("📊 Análisis de Probabilidades (Mercado Over/Under)")
+    promedio_goles = (stats_l['GF'] + stats_v['GC']) / (stats_l['PJ'] + 0.1)
     
-    # Lógica Over/Under básica basada en el promedio de goles
-    promedio_goles = (data_l['GF'] + data_v['GC']) / data_l['PJ']
-    with b1:
-        st.write("**Probabilidad Over 2.5:**")
-        st.progress(min(promedio_goles / 4, 1.0))
-        st.caption(f"Basado en {data_l['GF']} goles a favor del local.")
-    
-    with b2:
-        st.write("**Probabilidad Ambos Anotan:**")
-        anotan = 0.8 if data_l['GF'] > 1 and data_v['GF'] > 1 else 0.4
-        st.progress(anotan)
+    if promedio_goles > 2.5:
+        st.warning(f"⚠️ ALTA PROBABILIDAD DE OVER 2.5: El sistema detecta un flujo de {round(promedio_goles, 2)} goles.")
+    else:
+        st.info("💡 TENDENCIA UNDER: Defensas sólidas detectadas por la IA.")
 
