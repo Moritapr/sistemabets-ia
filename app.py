@@ -4,8 +4,8 @@ import numpy as np
 import requests
 from sklearn.ensemble import RandomForestRegressor
 
-# --- CONFIGURACIÓN DE LA APP ---
-st.set_page_config(page_title="SISTEMABETS IA: CHAMPIONS ELITE", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="SISTEMABETS IA: CHAMPIONS 25/26", layout="wide")
 
 st.markdown("""
     <style>
@@ -16,81 +16,77 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- TU API KEY VALIDADA ---
-API_KEY = "1e90385f6e65c6f70e71c8714e76d7d5" 
+# TU API KEY (Football-Data.org)
+API_KEY = "b5da8589cdef4d418bbe2afcbccadf10" 
 
 @st.cache_data(ttl=3600)
-def fetch_champions_live():
-    # League ID 2 (Champions) | Season 2025
-    url = "https://v3.football.api-sports.io/standings?league=2&season=2025"
-    headers = {
-        'x-rapidapi-host': "v3.football.api-sports.io",
-        'x-rapidapi-key': API_KEY
-    }
+def extraer_champions_v25_26():
+    # CL = Champions League | Season 2025 (inicia en 2025, termina en 2026)
+    url = "https://api.football-data.org/v4/competitions/CL/standings?season=2025"
+    headers = {'X-Auth-Token': API_KEY}
+    
     try:
-        response = requests.get(url, headers=headers, timeout=20)
-        res_json = response.json()
+        response = requests.get(url, headers=headers, timeout=15)
+        data = response.json()
         
-        # Validación de respuesta
-        if not res_json.get('response'):
-            return f"Error de API: {res_json.get('errors', 'Respuesta vacía')}"
+        # Validación de acceso a la temporada actual
+        if 'standings' not in data:
+            return f"Error: {data.get('message', 'No se encontraron datos para 25/26')}"
             
-        # Extraer la tabla de la fase de liga
-        standings = res_json['response'][0]['league']['standings'][0]
+        # Extraemos la tabla unificada (League Phase)
+        standings = data['standings'][0]['table']
         
         datos = []
         for team in standings:
             datos.append({
                 'Nombre': team['team']['name'],
                 'Puntos': team['points'],
-                'GF': team['all']['goals']['for'],
-                'GC': team['all']['goals']['against'],
-                'DIF': team['goalsDiff'],
-                'Forma': team['form'] if team['form'] else "N/A"
+                'GF': team['goalsFor'],
+                'GC': team['goalsAgainst'],
+                'DIF': team['goalDifference'],
+                'PJ': team['playedGames']
             })
         return pd.DataFrame(datos)
     except Exception as e:
-        return f"Fallo de conexión: {str(e)}"
+        return f"Fallo en la conexión: {str(e)}"
 
 # --- INTERFAZ ---
 st.title("🤖 SISTEMABETS IA: CHAMPIONS 25/26")
-st.write(f"Bregando con datos reales para Alejandro - {pd.to_datetime('today').strftime('%d/%m/%Y')}")
+st.write(f"Análisis en Tiempo Real - Temporada Actual - {pd.to_datetime('today').strftime('%d/%m/%Y')}")
 
-with st.spinner('Sincronizando con los servidores oficiales de la UEFA...'):
-    df_champions = fetch_champions_live()
+with st.spinner('Sincronizando con la UEFA para la temporada 25/26...'):
+    df = extraer_champions_v25_26()
 
-if isinstance(df_champions, str):
-    st.error(df_champions)
-    st.info("Revisa tu panel de API-Sports para asegurar que el plan 'Free' está activo.")
+if isinstance(df, str):
+    st.error(df)
+    st.info("Nota: Si la API dice que no tienes acceso a 2025, prueba cambiando la línea 24 a season=2024 para verificar conexión.")
 else:
-    st.success(f"✅ DATA FLOW ACTIVO: {len(df_champions)} equipos sincronizados.")
+    st.success(f"✅ DATA 25/26 ONLINE: {len(df)} equipos cargados.")
     
-    col_l, col_v = st.columns(2)
-    local = col_l.selectbox("Selecciona Local:", sorted(df_champions['Nombre'].unique()), index=0)
-    visita = col_v.selectbox("Selecciona Visita:", sorted(df_champions['Nombre'].unique()), index=1)
+    c1, c2 = st.columns(2)
+    local = c1.selectbox("Equipo Local:", sorted(df['Nombre'].unique()))
+    visita = c2.selectbox("Equipo Visitante:", sorted(df['Nombre'].unique()))
 
-    # --- MOTOR DE IA (Random Forest) ---
-    stats_l = df_champions[df_champions['Nombre'] == local].iloc[0]
-    stats_v = df_champions[df_champions['Nombre'] == visita].iloc[0]
+    # --- LÓGICA IA ---
+    eq_l = df[df['Nombre'] == local].iloc[0]
+    eq_v = df[df['Nombre'] == visita].iloc[0]
 
-    # Preparamos el modelo con los datos succionados
-    X_train = df_champions[['GF', 'DIF', 'Puntos']].values
-    y_train = np.arange(len(df_champions), 0, -1) # Ranking de poder
+    # Modelo entrenado con la jerarquía de la tabla actual
+    X = df[['GF', 'DIF', 'Puntos']].values
+    y = np.arange(len(df), 0, -1) 
     
-    model = RandomForestRegressor(n_estimators=100, random_state=42).fit(X_train, y_train)
-
-    # Proyección de resultados
-    pred_l = model.predict([[stats_l['GF'], stats_l['DIF'], stats_l['Puntos']]])[0]
-    pred_v = model.predict([[stats_v['GF'], stats_v['DIF'], stats_v['Puntos']]])[0]
+    model = RandomForestRegressor(n_estimators=100, random_state=42).fit(X, y)
+    
+    pred_l = model.predict([[eq_l['GF'], eq_l['DIF'], eq_l['Puntos']]])[0]
+    pred_v = model.predict([[eq_v['GF'], eq_v['DIF'], eq_v['Puntos']]])[0]
 
     prob_l = (pred_l / (pred_l + pred_v)) * 100
 
-    # --- DASHBOARD FINAL ---
+    # --- RESULTADOS ---
     st.divider()
-    r1, r2, r3 = st.columns(3)
-    r1.metric(f"Victoria {local}", f"{round(prob_l, 1)}%", f"Forma: {stats_l['Forma']}")
-    r2.metric(f"Victoria {visita}", f"{round(100-prob_l, 1)}%", f"Forma: {stats_v['Forma']}")
-    r3.metric("Cuota Justa", f"{round(100/prob_l, 2)}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Prob. {local}", f"{round(prob_l, 1)}%")
+    m2.metric(f"Prob. {visita}", f"{round(100-prob_l, 1)}%")
+    m3.metric("Cuota Sugerida", f"{round(100/prob_l, 2)}")
 
-    st.subheader("📝 Análisis Táctico IA")
-    st.write(f"El modelo asigna a **{local}** una probabilidad del **{round(prob_l, 1)}%** basado en su diferencial de **{stats_l['DIF']} goles**.")
+    st.info(f"💡 En la 25/26, {local} ha marcado {eq_l['GF']} goles en {eq_l['PJ']} partidos.")
