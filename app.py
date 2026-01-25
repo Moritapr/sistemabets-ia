@@ -4,1317 +4,1042 @@ import numpy as np
 import requests
 from datetime import datetime
 from scipy.stats import poisson
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="SISTEMABETS IA v5.0 ULTRA PRO", layout="wide")
+st.set_page_config(page_title="SISTEMABETS ML v6.0", layout="wide")
 
 # ============================================================================
-# MÓDULO 1: CONECTOR AVANZADO FOOTBALL-DATA.ORG
+# MÓDULO 1: RECOLECTOR DE DATOS HISTÓRICOS
 # ============================================================================
 
-class FootballDataAPI:
-    """Conector profesional con análisis de 20 partidos multi-competición"""
-    
-    BASE_URL = "https://api.football-data.org/v4"
-    
-    LIGAS = {
-        "Champions League": "CL",
-        "Premier League": "PL",
-        "La Liga": "PD",
-        "Bundesliga": "BL1",
-        "Serie A": "SA",
-        "Ligue 1": "FL1",
-        "Eredivisie": "DED",
-        "Championship": "ELC",
-        "Liga Portugal": "PPL"
-    }
-    
-    def __init__(self, api_key):
-        self.headers = {"X-Auth-Token": api_key}
-        self.cache_teams = {}
-    
-    def obtener_standings(self, liga_code):
-        """Obtiene tabla de posiciones y cachea IDs de equipos"""
-        try:
-            url = f"{self.BASE_URL}/competitions/{liga_code}/standings"
-            response = requests.get(url, headers=self.headers, timeout=15)
-            
-            if response.status_code != 200:
-                return None
-            
-            data = response.json()
-            if not data.get('standings'):
-                return None
-            
-            standings = data['standings'][0]['table']
-            equipos = []
-            
-            for team in standings:
-                team_id = team['team']['id']
-                team_name = team['team']['name']
-                self.cache_teams[team_name] = team_id
-                
-                equipos.append({
-                    'Equipo': team_name,
-                    'ID': team_id,
-                    'PJ': team['playedGames'],
-                    'Victorias': team['won'],
-                    'Empates': team['draw'],
-                    'Derrotas': team['lost'],
-                    'GF': team['goalsFor'],
-                    'GC': team['goalsAgainst'],
-                    'Pts': team['points'],
-                    'Posicion': team['position']
-                })
-            
-            return pd.DataFrame(equipos)
-            
-        except Exception as e:
-            st.error(f"Error API: {str(e)}")
-            return None
-    
-    def obtener_ultimos_20_partidos(self, equipo_nombre):
-        """Obtiene últimos 20 partidos del equipo en TODAS las competiciones"""
-        try:
-            team_id = self.cache_teams.get(equipo_nombre)
-            
-            if not team_id:
-                st.warning(f"No se encontró ID para {equipo_nombre}")
-                return []
-            
-            url = f"{self.BASE_URL}/teams/{team_id}/matches"
-            params = {"status": "FINISHED", "limit": 100}
-            
-            response = requests.get(url, headers=self.headers, params=params, timeout=15)
-            
-            if response.status_code != 200:
-                return []
-            
-            data = response.json()
-            partidos = []
-            
-            for match in data.get('matches', []):
-                if match['score']['fullTime']['home'] is None:
-                    continue
-                
-                home_team = match['homeTeam']['name']
-                away_team = match['awayTeam']['name']
-                
-                if home_team != equipo_nombre and away_team != equipo_nombre:
-                    continue
-                
-                partidos.append({
-                    'local': home_team,
-                    'visitante': away_team,
-                    'goles_local': match['score']['fullTime']['home'],
-                    'goles_visitante': match['score']['fullTime']['away'],
-                    'fecha': match['utcDate'],
-                    'competicion': match['competition']['name']
-                })
-            
-            partidos_ordenados = sorted(partidos, key=lambda x: x['fecha'], reverse=True)
-            return partidos_ordenados[:20]
-            
-        except Exception as e:
-            st.warning(f"Error obteniendo historial de {equipo_nombre}: {str(e)}")
-            return []
-    
-    def obtener_enfrentamientos_directos(self, equipo1, equipo2):
-        """Obtiene historial de enfrentamientos directos (H2H)"""
-        try:
-            team_id = self.cache_teams.get(equipo1)
-            if not team_id:
-                return []
-            
-            url = f"{self.BASE_URL}/teams/{team_id}/matches"
-            params = {"status": "FINISHED", "limit": 100}
-            
-            response = requests.get(url, headers=self.headers, params=params, timeout=15)
-            
-            if response.status_code != 200:
-                return []
-            
-            data = response.json()
-            h2h = []
-            
-            for match in data.get('matches', []):
-                if match['score']['fullTime']['home'] is None:
-                    continue
-                
-                home = match['homeTeam']['name']
-                away = match['awayTeam']['name']
-                
-                if (home == equipo1 and away == equipo2) or (home == equipo2 and away == equipo1):
-                    h2h.append({
-                        'local': home,
-                        'visitante': away,
-                        'goles_local': match['score']['fullTime']['home'],
-                        'goles_visitante': match['score']['fullTime']['away'],
-                        'fecha': match['utcDate'],
-                        'competicion': match['competition']['name']
-                    })
-            
-            return sorted(h2h, key=lambda x: x['fecha'], reverse=True)[:10]
-            
-        except Exception as e:
-            return []
-
-# ============================================================================
-# MÓDULO 2: MOTOR DE ANÁLISIS ULTRA PROFUNDO
-# ============================================================================
-
-class AnalizadorUltraProfundo:
-    """Motor de IA con análisis de múltiples factores y argumentos sólidos"""
-    
-    VENTAJA_LOCAL_BASE = 1.15
-    MIN_PROBABILIDAD_REALISTA = 0.005  # 0.5% mínimo para evitar valores irreales
+class RecolectorDatos:
+    """Recolecta y prepara datos históricos para entrenar el modelo"""
     
     @staticmethod
-    def calcular_forma_20_partidos(partidos, equipo_nombre):
-        """Calcula forma usando los últimos 20 partidos con pesos decrecientes"""
-        if not partidos:
-            return 0.50, "", {}
+    def obtener_features_partido(local_stats, visitante_stats, local_team, visitante_team, h2h_stats=None):
+        """
+        Extrae features (características) de un partido para ML
         
-        puntos = []
-        forma_visual = ""
-        detalles = {
-            'victorias': 0, 'empates': 0, 'derrotas': 0,
-            'gf': 0, 'gc': 0, 'racha_actual': "",
-            'goles_1h': 0, 'goles_2h': 0,
-            'corners_promedio': 0, 'tarjetas_promedio': 0
-        }
+        FEATURES IMPORTANTES:
+        - Forma reciente (últimos 5, 10, 20 partidos)
+        - Stats ofensivas/defensivas
+        - Diferencia de posición en tabla
+        - Rendimiento local/visitante específico
+        - Historial H2H
+        - Racha actual
+        """
         
-        for i, partido in enumerate(partidos[:20]):
-            es_local = partido['local'] == equipo_nombre
-            gf = partido['goles_local'] if es_local else partido['goles_visitante']
-            gc = partido['goles_visitante'] if es_local else partido['goles_local']
+        features = {}
+        
+        # 1. STATS BÁSICAS
+        features['local_gf_promedio'] = local_stats.get('gf_promedio', 0)
+        features['local_gc_promedio'] = local_stats.get('gc_promedio', 0)
+        features['visitante_gf_promedio'] = visitante_stats.get('gf_promedio', 0)
+        features['visitante_gc_promedio'] = visitante_stats.get('gc_promedio', 0)
+        
+        # 2. FORMA RECIENTE (ponderada)
+        features['local_forma_5'] = local_stats.get('forma_5', 0.5)
+        features['local_forma_10'] = local_stats.get('forma_10', 0.5)
+        features['local_forma_20'] = local_stats.get('forma_20', 0.5)
+        features['visitante_forma_5'] = visitante_stats.get('forma_5', 0.5)
+        features['visitante_forma_10'] = visitante_stats.get('forma_10', 0.5)
+        features['visitante_forma_20'] = visitante_stats.get('forma_20', 0.5)
+        
+        # 3. DIFERENCIA DE FORMA
+        features['diff_forma'] = features['local_forma_5'] - features['visitante_forma_5']
+        
+        # 4. STATS ESPECÍFICAS LOCAL/VISITANTE
+        features['local_en_casa_gf'] = local_stats.get('local_gf', 0)
+        features['local_en_casa_gc'] = local_stats.get('local_gc', 0)
+        features['visitante_fuera_gf'] = visitante_stats.get('visitante_gf', 0)
+        features['visitante_fuera_gc'] = visitante_stats.get('visitante_gc', 0)
+        
+        # 5. POSICIÓN EN TABLA
+        features['local_posicion'] = local_team.get('Posicion', 10)
+        features['visitante_posicion'] = visitante_team.get('Posicion', 10)
+        features['diff_posicion'] = features['visitante_posicion'] - features['local_posicion']
+        
+        # 6. PUNTOS
+        features['local_puntos'] = local_team.get('Pts', 0)
+        features['visitante_puntos'] = visitante_team.get('Pts', 0)
+        features['diff_puntos'] = features['local_puntos'] - features['visitante_puntos']
+        
+        # 7. RACHA (últimos 3 partidos)
+        features['local_racha_victorias'] = local_stats.get('racha_victorias', 0)
+        features['visitante_racha_victorias'] = visitante_stats.get('racha_victorias', 0)
+        
+        # 8. OVER/UNDER TENDENCIAS
+        features['local_over25_ratio'] = local_stats.get('over25_ratio', 0.5)
+        features['visitante_over25_ratio'] = visitante_stats.get('over25_ratio', 0.5)
+        
+        # 9. BTTS TENDENCIAS
+        features['local_btts_ratio'] = local_stats.get('btts_ratio', 0.5)
+        features['visitante_btts_ratio'] = visitante_stats.get('btts_ratio', 0.5)
+        
+        # 10. H2H (si existe)
+        if h2h_stats:
+            features['h2h_local_victorias'] = h2h_stats.get('local_wins', 0)
+            features['h2h_empates'] = h2h_stats.get('draws', 0)
+            features['h2h_visitante_victorias'] = h2h_stats.get('away_wins', 0)
+            features['h2h_goles_promedio'] = h2h_stats.get('avg_goals', 2.5)
+        else:
+            features['h2h_local_victorias'] = 0
+            features['h2h_empates'] = 0
+            features['h2h_visitante_victorias'] = 0
+            features['h2h_goles_promedio'] = 2.5
+        
+        # 11. EFICIENCIA OFENSIVA/DEFENSIVA
+        features['local_eficiencia_ofensiva'] = features['local_gf_promedio'] / max(features['local_gc_promedio'], 0.5)
+        features['visitante_eficiencia_ofensiva'] = features['visitante_gf_promedio'] / max(features['visitante_gc_promedio'], 0.5)
+        
+        return features
+    
+    @staticmethod
+    def crear_dataset_historico(partidos_historicos):
+        """
+        Convierte partidos históricos en dataset para entrenar
+        
+        partidos_historicos = [
+            {
+                'local': 'Team A',
+                'visitante': 'Team B',
+                'goles_local': 2,
+                'goles_visitante': 1,
+                'features': {...}  # features calculadas arriba
+            },
+            ...
+        ]
+        
+        Returns: X (features), y_1x2, y_over25, y_btts
+        """
+        
+        X = []
+        y_1x2 = []  # 0=Visitante, 1=Empate, 2=Local
+        y_over25 = []  # 0=Under, 1=Over
+        y_btts = []  # 0=No, 1=Si
+        
+        for partido in partidos_historicos:
+            features = partido['features']
+            goles_local = partido['goles_local']
+            goles_visitante = partido['goles_visitante']
             
-            detalles['gf'] += gf
-            detalles['gc'] += gc
-            detalles['goles_1h'] += int(gf * 0.45)
-            detalles['goles_2h'] += int(gf * 0.55)
+            # Convertir features dict a lista ordenada
+            feature_vector = [
+                features['local_gf_promedio'],
+                features['local_gc_promedio'],
+                features['visitante_gf_promedio'],
+                features['visitante_gc_promedio'],
+                features['local_forma_5'],
+                features['local_forma_10'],
+                features['local_forma_20'],
+                features['visitante_forma_5'],
+                features['visitante_forma_10'],
+                features['visitante_forma_20'],
+                features['diff_forma'],
+                features['local_en_casa_gf'],
+                features['local_en_casa_gc'],
+                features['visitante_fuera_gf'],
+                features['visitante_fuera_gc'],
+                features['local_posicion'],
+                features['visitante_posicion'],
+                features['diff_posicion'],
+                features['local_puntos'],
+                features['visitante_puntos'],
+                features['diff_puntos'],
+                features['local_racha_victorias'],
+                features['visitante_racha_victorias'],
+                features['local_over25_ratio'],
+                features['visitante_over25_ratio'],
+                features['local_btts_ratio'],
+                features['visitante_btts_ratio'],
+                features['h2h_local_victorias'],
+                features['h2h_empates'],
+                features['h2h_visitante_victorias'],
+                features['h2h_goles_promedio'],
+                features['local_eficiencia_ofensiva'],
+                features['visitante_eficiencia_ofensiva']
+            ]
             
-            if gf > gc:
-                puntos.append(1.0)
-                forma_visual += "V"
-                detalles['victorias'] += 1
-                if i < 5:
-                    detalles['racha_actual'] += "✅"
-            elif gf == gc:
-                puntos.append(0.5)
-                forma_visual += "E"
-                detalles['empates'] += 1
-                if i < 5:
-                    detalles['racha_actual'] += "🟰"
+            X.append(feature_vector)
+            
+            # Labels (resultados reales)
+            if goles_local > goles_visitante:
+                y_1x2.append(2)  # Local ganó
+            elif goles_local == goles_visitante:
+                y_1x2.append(1)  # Empate
             else:
-                puntos.append(0.0)
-                forma_visual += "D"
-                detalles['derrotas'] += 1
-                if i < 5:
-                    detalles['racha_actual'] += "❌"
+                y_1x2.append(0)  # Visitante ganó
+            
+            total_goles = goles_local + goles_visitante
+            y_over25.append(1 if total_goles > 2.5 else 0)
+            y_btts.append(1 if goles_local > 0 and goles_visitante > 0 else 0)
         
-        pesos = np.linspace(0.10, 0.005, len(puntos))
-        pesos = pesos / pesos.sum()
-        score_forma = sum(p * w for p, w in zip(puntos, pesos))
-        
-        return score_forma, forma_visual, detalles
+        return np.array(X), np.array(y_1x2), np.array(y_over25), np.array(y_btts)
+
+# ============================================================================
+# MÓDULO 2: MODELOS DE MACHINE LEARNING
+# ============================================================================
+
+class ModeloML:
+    """
+    Modelo de Machine Learning para predicción de partidos
     
-    @staticmethod
-    def calcular_stats_avanzadas(equipo_nombre, partidos):
-        """Calcula estadísticas avanzadas: local/visitante, primera mitad, etc."""
-        stats = {
-            'local_pj': 0, 'local_gf': 0, 'local_gc': 0, 'local_victorias': 0,
-            'visitante_pj': 0, 'visitante_gf': 0, 'visitante_gc': 0, 'visitante_victorias': 0,
-            'partidos_over25': 0, 'partidos_btts': 0,
-            'goles_1h_favor': 0, 'goles_1h_contra': 0,
-            'partidos_gol_1h': 0
-        }
-        
-        for p in partidos[:20]:
-            total_goles = p['goles_local'] + p['goles_visitante']
-            
-            if total_goles > 2.5:
-                stats['partidos_over25'] += 1
-            
-            if p['goles_local'] > 0 and p['goles_visitante'] > 0:
-                stats['partidos_btts'] += 1
-            
-            if p['local'] == equipo_nombre:
-                stats['local_pj'] += 1
-                stats['local_gf'] += p['goles_local']
-                stats['local_gc'] += p['goles_visitante']
-                if p['goles_local'] > p['goles_visitante']:
-                    stats['local_victorias'] += 1
-                
-                goles_1h = int(p['goles_local'] * 0.45)
-                stats['goles_1h_favor'] += goles_1h
-                stats['goles_1h_contra'] += int(p['goles_visitante'] * 0.45)
-                if goles_1h > 0:
-                    stats['partidos_gol_1h'] += 1
-                    
-            elif p['visitante'] == equipo_nombre:
-                stats['visitante_pj'] += 1
-                stats['visitante_gf'] += p['goles_visitante']
-                stats['visitante_gc'] += p['goles_local']
-                if p['goles_visitante'] > p['goles_local']:
-                    stats['visitante_victorias'] += 1
-                
-                goles_1h = int(p['goles_visitante'] * 0.45)
-                stats['goles_1h_favor'] += goles_1h
-                stats['goles_1h_contra'] += int(p['goles_local'] * 0.45)
-                if goles_1h > 0:
-                    stats['partidos_gol_1h'] += 1
-        
-        return stats
+    Usa 3 modelos independientes:
+    - Modelo 1X2 (clasificación multiclase)
+    - Modelo Over/Under 2.5 (clasificación binaria)
+    - Modelo BTTS (clasificación binaria)
+    """
     
-    @staticmethod
-    def calcular_lambdas_y_factores(local_team, visitante_team, df_liga, partidos_local, partidos_visitante, h2h):
-        """Calcula lambdas con análisis profundo y genera argumentos"""
-        
-        gf_local_tabla = local_team['GF'] / max(local_team['PJ'], 1)
-        gc_local_tabla = local_team['GC'] / max(local_team['PJ'], 1)
-        gf_visitante_tabla = visitante_team['GF'] / max(visitante_team['PJ'], 1)
-        gc_visitante_tabla = visitante_team['GC'] / max(visitante_team['PJ'], 1)
-        
-        forma_local, _, detalles_local = AnalizadorUltraProfundo.calcular_forma_20_partidos(
-            partidos_local, local_team['Equipo']
-        )
-        forma_visitante, _, detalles_visitante = AnalizadorUltraProfundo.calcular_forma_20_partidos(
-            partidos_visitante, visitante_team['Equipo']
+    def __init__(self):
+        # Random Forest: Bueno para capturar relaciones no lineales
+        self.modelo_1x2 = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=15,
+            min_samples_split=10,
+            random_state=42
         )
         
-        stats_local = AnalizadorUltraProfundo.calcular_stats_avanzadas(
-            local_team['Equipo'], partidos_local
+        self.modelo_over25 = GradientBoostingClassifier(
+            n_estimators=150,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42
         )
-        stats_visitante = AnalizadorUltraProfundo.calcular_stats_avanzadas(
-            visitante_team['Equipo'], partidos_visitante
+        
+        self.modelo_btts = GradientBoostingClassifier(
+            n_estimators=150,
+            max_depth=5,
+            learning_rate=0.1,
+            random_state=42
         )
         
-        gf_local_casa = stats_local['local_gf'] / max(stats_local['local_pj'], 1) if stats_local['local_pj'] > 0 else gf_local_tabla
-        gc_local_casa = stats_local['local_gc'] / max(stats_local['local_pj'], 1) if stats_local['local_pj'] > 0 else gc_local_tabla
-        gf_visitante_fuera = stats_visitante['visitante_gf'] / max(stats_visitante['visitante_pj'], 1) if stats_visitante['visitante_pj'] > 0 else gf_visitante_tabla
-        gc_visitante_fuera = stats_visitante['visitante_gc'] / max(stats_visitante['visitante_pj'], 1) if stats_visitante['visitante_pj'] > 0 else gc_visitante_tabla
-        
-        media_goles_liga = df_liga['GF'].sum() / df_liga['PJ'].sum()
-        
-        lambda_local = (gf_local_casa / media_goles_liga) * (gc_visitante_fuera / media_goles_liga) * media_goles_liga
-        lambda_visitante = (gf_visitante_fuera / media_goles_liga) * (gc_local_casa / media_goles_liga) * media_goles_liga
-        
-        ventaja_local = AnalizadorUltraProfundo.VENTAJA_LOCAL_BASE
-        if stats_local['local_pj'] >= 5:
-            winrate_casa = stats_local['local_victorias'] / stats_local['local_pj']
-            if winrate_casa > 0.7:
-                ventaja_local *= 1.10
-            elif winrate_casa < 0.3:
-                ventaja_local *= 0.92
-        
-        lambda_local *= ventaja_local
-        lambda_visitante /= (ventaja_local * 0.90)
-        
-        if forma_local > 0.75:
-            lambda_local *= 1.25
-        elif forma_local > 0.60:
-            lambda_local *= 1.12
-        elif forma_local < 0.25:
-            lambda_local *= 0.80
-        elif forma_local < 0.40:
-            lambda_local *= 0.90
-        
-        if forma_visitante > 0.75:
-            lambda_visitante *= 1.25
-        elif forma_visitante > 0.60:
-            lambda_visitante *= 1.12
-        elif forma_visitante < 0.25:
-            lambda_visitante *= 0.80
-        elif forma_visitante < 0.40:
-            lambda_visitante *= 0.90
-        
-        diff_posiciones = abs(local_team['Posicion'] - visitante_team['Posicion'])
-        diff_puntos = abs(local_team['Pts'] - visitante_team['Pts'])
-        
-        factor_calidad = 1.0
-        if diff_posiciones >= 8 or diff_puntos >= 15:
-            if local_team['Posicion'] < visitante_team['Posicion']:
-                factor_calidad = 1.12
-                lambda_local *= factor_calidad
-                lambda_visitante *= 0.88
-            else:
-                factor_calidad = 0.88
-                lambda_local *= factor_calidad
-                lambda_visitante *= 1.12
-        
-        h2h_factor_local = 1.0
-        h2h_factor_visitante = 1.0
-        if h2h and len(h2h) >= 3:
-            victorias_local_h2h = sum(1 for p in h2h if 
-                (p['local'] == local_team['Equipo'] and p['goles_local'] > p['goles_visitante']) or
-                (p['visitante'] == local_team['Equipo'] and p['goles_visitante'] > p['goles_local'])
-            )
-            if victorias_local_h2h / len(h2h) > 0.6:
-                h2h_factor_local = 1.08
-                h2h_factor_visitante = 0.94
-            elif victorias_local_h2h / len(h2h) < 0.3:
-                h2h_factor_local = 0.94
-                h2h_factor_visitante = 1.08
-            
-            lambda_local *= h2h_factor_local
-            lambda_visitante *= h2h_factor_visitante
-        
-        lambda_local = max(lambda_local, 0.25)
-        lambda_visitante = max(lambda_visitante, 0.25)
-        lambda_local = min(lambda_local, 4.5)
-        lambda_visitante = min(lambda_visitante, 4.5)
-        
-        return lambda_local, lambda_visitante, {
-            'forma_local': forma_local,
-            'forma_visitante': forma_visitante,
-            'detalles_local': detalles_local,
-            'detalles_visitante': detalles_visitante,
-            'stats_local': stats_local,
-            'stats_visitante': stats_visitante,
-            'ventaja_local': ventaja_local,
-            'factor_calidad': factor_calidad,
-            'h2h_factor_local': h2h_factor_local
-        }
+        self.scaler = StandardScaler()
+        self.entrenado = False
+        self.feature_names = [
+            'local_gf_promedio', 'local_gc_promedio', 'visitante_gf_promedio', 'visitante_gc_promedio',
+            'local_forma_5', 'local_forma_10', 'local_forma_20',
+            'visitante_forma_5', 'visitante_forma_10', 'visitante_forma_20',
+            'diff_forma', 'local_en_casa_gf', 'local_en_casa_gc',
+            'visitante_fuera_gf', 'visitante_fuera_gc',
+            'local_posicion', 'visitante_posicion', 'diff_posicion',
+            'local_puntos', 'visitante_puntos', 'diff_puntos',
+            'local_racha_victorias', 'visitante_racha_victorias',
+            'local_over25_ratio', 'visitante_over25_ratio',
+            'local_btts_ratio', 'visitante_btts_ratio',
+            'h2h_local_victorias', 'h2h_empates', 'h2h_visitante_victorias',
+            'h2h_goles_promedio', 'local_eficiencia_ofensiva', 'visitante_eficiencia_ofensiva'
+        ]
     
-    @staticmethod
-    def matriz_probabilidades(lambda_l, lambda_v, max_goles=8):
-        """Genera matriz de probabilidades con Poisson"""
-        matriz = np.zeros((max_goles, max_goles))
+    def entrenar(self, X, y_1x2, y_over25, y_btts):
+        """
+        Entrena los 3 modelos con datos históricos
         
-        for i in range(max_goles):
-            for j in range(max_goles):
-                matriz[i, j] = poisson.pmf(i, lambda_l) * poisson.pmf(j, lambda_v)
+        Returns: métricas de precisión
+        """
         
-        return matriz
-    
-    @staticmethod
-    def calcular_mercados_extendidos(matriz, stats_local, stats_visitante, lambda_l, lambda_v):
-        """Calcula TODOS los mercados incluyendo handicap, primera mitad, etc."""
+        # Normalizar features
+        X_scaled = self.scaler.fit_transform(X)
         
-        # 1X2
-        p_local = np.sum(np.tril(matriz, -1))
-        p_empate = np.sum(np.diag(matriz))
-        p_visitante = np.sum(np.triu(matriz, 1))
+        # Split train/test (80/20)
+        X_train, X_test, y_1x2_train, y_1x2_test = train_test_split(
+            X_scaled, y_1x2, test_size=0.2, random_state=42
+        )
         
-        total_1x2 = p_local + p_empate + p_visitante
-        p_local = max(p_local / total_1x2, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        p_empate = max(p_empate / total_1x2, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        p_visitante = max(p_visitante / total_1x2, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
+        _, _, y_over_train, y_over_test = train_test_split(
+            X_scaled, y_over25, test_size=0.2, random_state=42
+        )
         
-        # Over/Under
-        over_under = {}
-        for threshold in [0.5, 1.5, 2.5, 3.5, 4.5]:
-            limite = threshold + 0.01
-            p_over = sum([matriz[i, j] for i in range(matriz.shape[0]) 
-                         for j in range(matriz.shape[1]) if (i+j) > limite])
-            p_under = 1 - p_over
-            over_under[f"Over {threshold}"] = max(p_over, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-            over_under[f"Under {threshold}"] = max(p_under, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
+        _, _, y_btts_train, y_btts_test = train_test_split(
+            X_scaled, y_btts, test_size=0.2, random_state=42
+        )
         
-        # BTTS
-        p_btts_no = matriz[0,:].sum() + matriz[:,0].sum() - matriz[0,0]
-        p_btts_si = max(1 - p_btts_no, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        p_btts_no = max(p_btts_no, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
+        # Entrenar modelos
+        self.modelo_1x2.fit(X_train, y_1x2_train)
+        self.modelo_over25.fit(X_train, y_over_train)
+        self.modelo_btts.fit(X_train, y_btts_train)
         
-        # Doble Oportunidad
-        doble_oportunidad = {
-            '1X (Local o Empate)': p_local + p_empate,
-            '12 (Local o Visitante)': p_local + p_visitante,
-            'X2 (Empate o Visitante)': p_empate + p_visitante
-        }
+        # Evaluar
+        acc_1x2 = self.modelo_1x2.score(X_test, y_1x2_test)
+        acc_over = self.modelo_over25.score(X_test, y_over_test)
+        acc_btts = self.modelo_btts.score(X_test, y_btts_test)
         
-        # Handicap Asiático
-        handicap = {}
-        p_local_menos15 = sum([matriz[i, j] for i in range(matriz.shape[0]) 
-                              for j in range(matriz.shape[1]) if i - j >= 2])
-        handicap['Local -1.5'] = max(p_local_menos15, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        handicap['Visitante +1.5'] = max(1 - p_local_menos15, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        
-        p_local_menos05 = sum([matriz[i, j] for i in range(matriz.shape[0]) 
-                              for j in range(matriz.shape[1]) if i > j])
-        handicap['Local -0.5'] = max(p_local_menos05, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        handicap['Visitante +0.5'] = max(1 - p_local_menos05, AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        
-        # Primera Mitad
-        goles_1h_local = stats_local['goles_1h_favor'] / 20 if stats_local else lambda_l * 0.45
-        goles_1h_visitante = stats_visitante['goles_1h_favor'] / 20 if stats_visitante else lambda_v * 0.45
-        
-        primera_mitad = {
-            'Gol en 1H': max(1 - poisson.pmf(0, goles_1h_local + goles_1h_visitante), AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA),
-            'Más de 0.5 goles 1H': max(1 - poisson.pmf(0, goles_1h_local + goles_1h_visitante), AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA),
-            'Más de 1.5 goles 1H': max(sum([poisson.pmf(k, goles_1h_local + goles_1h_visitante) for k in range(2, 10)]), AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-        }
-        
-        # Resultado exacto
-        idx_max = np.unravel_index(matriz.argmax(), matriz.shape)
-        top_resultados = []
-        matriz_flat = matriz.flatten()
-        indices_ordenados = np.argsort(matriz_flat)[::-1][:5]
-        
-        for idx in indices_ordenados:
-            i = idx // matriz.shape[1]
-            j = idx % matriz.shape[1]
-            top_resultados.append({
-                'Marcador': f"{i}-{j}",
-                'Probabilidad': max(matriz[i, j], AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA)
-            })
+        self.entrenado = True
         
         return {
-            '1X2': {'Local': p_local, 'Empate': p_empate, 'Visitante': p_visitante},
-            'Over/Under': over_under,
-            'BTTS': {'Si': p_btts_si, 'No': p_btts_no},
-            'Doble_Oportunidad': doble_oportunidad,
-            'Handicap': handicap,
-            'Primera_Mitad': primera_mitad,
-            'Resultado_Exacto': f"{idx_max[0]}-{idx_max[1]}",
-            'Prob_Exacto': max(matriz[idx_max[0], idx_max[1]], AnalizadorUltraProfundo.MIN_PROBABILIDAD_REALISTA),
-            'Top_Resultados': top_resultados
+            'accuracy_1x2': acc_1x2,
+            'accuracy_over25': acc_over,
+            'accuracy_btts': acc_btts,
+            'n_samples': len(X)
         }
+    
+    def predecir(self, features):
+        """
+        Predice resultado de un partido
+        
+        Returns: probabilidades para cada mercado
+        """
+        
+        if not self.entrenado:
+            raise ValueError("El modelo debe ser entrenado primero")
+        
+        # Convertir features dict a array
+        feature_vector = np.array([[
+            features['local_gf_promedio'],
+            features['local_gc_promedio'],
+            features['visitante_gf_promedio'],
+            features['visitante_gc_promedio'],
+            features['local_forma_5'],
+            features['local_forma_10'],
+            features['local_forma_20'],
+            features['visitante_forma_5'],
+            features['visitante_forma_10'],
+            features['visitante_forma_20'],
+            features['diff_forma'],
+            features['local_en_casa_gf'],
+            features['local_en_casa_gc'],
+            features['visitante_fuera_gf'],
+            features['visitante_fuera_gc'],
+            features['local_posicion'],
+            features['visitante_posicion'],
+            features['diff_posicion'],
+            features['local_puntos'],
+            features['visitante_puntos'],
+            features['diff_puntos'],
+            features['local_racha_victorias'],
+            features['visitante_racha_victorias'],
+            features['local_over25_ratio'],
+            features['visitante_over25_ratio'],
+            features['local_btts_ratio'],
+            features['visitante_btts_ratio'],
+            features['h2h_local_victorias'],
+            features['h2h_empates'],
+            features['h2h_visitante_victorias'],
+            features['h2h_goles_promedio'],
+            features['local_eficiencia_ofensiva'],
+            features['visitante_eficiencia_ofensiva']
+        ]])
+        
+        # Normalizar
+        X_scaled = self.scaler.transform(feature_vector)
+        
+        # Predecir probabilidades
+        prob_1x2 = self.modelo_1x2.predict_proba(X_scaled)[0]  # [prob_visitante, prob_empate, prob_local]
+        prob_over25 = self.modelo_over25.predict_proba(X_scaled)[0][1]  # probabilidad Over
+        prob_btts = self.modelo_btts.predict_proba(X_scaled)[0][1]  # probabilidad BTTS Si
+        
+        return {
+            '1X2': {
+                'Visitante': prob_1x2[0],
+                'Empate': prob_1x2[1],
+                'Local': prob_1x2[2]
+            },
+            'Over/Under': {
+                'Over 2.5': prob_over25,
+                'Under 2.5': 1 - prob_over25
+            },
+            'BTTS': {
+                'Si': prob_btts,
+                'No': 1 - prob_btts
+            }
+        }
+    
+    def obtener_importancia_features(self):
+        """
+        Muestra qué features son más importantes para cada modelo
+        """
+        
+        if not self.entrenado:
+            return None
+        
+        importancia_1x2 = self.modelo_1x2.feature_importances_
+        importancia_over = self.modelo_over25.feature_importances_
+        importancia_btts = self.modelo_btts.feature_importances_
+        
+        df_importancia = pd.DataFrame({
+            'Feature': self.feature_names,
+            'Importancia_1X2': importancia_1x2,
+            'Importancia_Over25': importancia_over,
+            'Importancia_BTTS': importancia_btts
+        })
+        
+        df_importancia = df_importancia.sort_values('Importancia_1X2', ascending=False)
+        
+        return df_importancia
+    
+    def guardar_modelo(self, path='modelo_ml.pkl'):
+        """Guarda el modelo entrenado"""
+        joblib.dump({
+            'modelo_1x2': self.modelo_1x2,
+            'modelo_over25': self.modelo_over25,
+            'modelo_btts': self.modelo_btts,
+            'scaler': self.scaler,
+            'entrenado': self.entrenado
+        }, path)
+    
+    def cargar_modelo(self, path='modelo_ml.pkl'):
+        """Carga un modelo previamente entrenado"""
+        data = joblib.dump(path)
+        self.modelo_1x2 = data['modelo_1x2']
+        self.modelo_over25 = data['modelo_over25']
+        self.modelo_btts = data['modelo_btts']
+        self.scaler = data['scaler']
+        self.entrenado = data['entrenado']
 
 # ============================================================================
-# MÓDULO 3: GENERADOR DE ARGUMENTOS Y RECOMENDACIONES
+# MÓDULO 3: GENERADOR DE DATOS SINTÉTICOS (PARA DEMO)
 # ============================================================================
 
-class GeneradorArgumentos:
-    """Genera argumentos sólidos para cada apuesta recomendada"""
+def generar_datos_sinteticos(n_partidos=500):
+    """
+    Genera datos sintéticos para demostración
+    En producción, usarías datos REALES de una API o base de datos
+    """
     
-    @staticmethod
-    def generar_argumento_1x2(resultado, prob, local_team, visitante_team, analisis):
-        """Genera argumento para apuesta 1X2"""
-        argumentos = []
-        
-        forma_local = analisis['forma_local']
-        forma_visitante = analisis['forma_visitante']
-        detalles_local = analisis['detalles_local']
-        detalles_visitante = analisis['detalles_visitante']
-        
-        if resultado == "Local":
-            if forma_local > 0.7:
-                argumentos.append(f"✅ {local_team['Equipo']} tiene excelente forma ({forma_local*100:.0f}%) con {detalles_local['victorias']} victorias en últimos 20 partidos")
-            
-            if local_team['Posicion'] < visitante_team['Posicion'] - 5:
-                argumentos.append(f"📊 Diferencia de nivel: {local_team['Equipo']} está {visitante_team['Posicion'] - local_team['Posicion']} posiciones arriba en la tabla")
-            
-            stats_local = analisis['stats_local']
-            if stats_local['local_pj'] >= 5:
-                winrate = stats_local['local_victorias'] / stats_local['local_pj']
-                if winrate > 0.6:
-                    argumentos.append(f"🏠 Fuerte en casa: {stats_local['local_victorias']}/{stats_local['local_pj']} victorias jugando de local ({winrate*100:.0f}%)")
-            
-            if analisis.get('h2h_factor_local', 1.0) > 1.0:
-                argumentos.append(f"🎯 Domina los enfrentamientos directos históricamente")
-        
-        elif resultado == "Visitante":
-            if forma_visitante > 0.7:
-                argumentos.append(f"✅ {visitante_team['Equipo']} tiene excelente forma ({forma_visitante*100:.0f}%) con {detalles_visitante['victorias']} victorias recientes")
-            
-            if visitante_team['Posicion'] < local_team['Posicion'] - 5:
-                argumentos.append(f"📊 Equipo superior: {visitante_team['Posicion']} vs {local_team['Posicion']} en la tabla")
-            
-            stats_visitante = analisis['stats_visitante']
-            if stats_visitante['visitante_pj'] >= 5:
-                winrate = stats_visitante['visitante_victorias'] / stats_visitante['visitante_pj']
-                if winrate > 0.5:
-                    argumentos.append(f"✈️ Buen rendimiento fuera: {stats_visitante['visitante_victorias']}/{stats_visitante['visitante_pj']} victorias de visitante ({winrate*100:.0f}%)")
-            
-            if forma_local < 0.4:
-                argumentos.append(f"📉 {local_team['Equipo']} con mala forma reciente ({forma_local*100:.0f}%), solo {detalles_local['victorias']} victorias en 20 partidos")
-        
-        else:  # Empate
-            if abs(forma_local - forma_visitante) < 0.15:
-                argumentos.append(f"⚖️ Equipos igualados en forma: {forma_local*100:.0f}% vs {forma_visitante*100:.0f}%")
-            
-            if abs(local_team['Posicion'] - visitante_team['Posicion']) <= 3:
-                argumentos.append(f"📊 Posiciones muy cercanas en la tabla ({local_team['Posicion']} vs {visitante_team['Posicion']})")
-            
-            empates_local = detalles_local['empates']
-            empates_visitante = detalles_visitante['empates']
-            if empates_local + empates_visitante >= 8:
-                argumentos.append(f"🤝 Alta tendencia al empate: {empates_local} + {empates_visitante} empates en sus últimos 20 partidos")
-        
-        return argumentos
+    np.random.seed(42)
+    partidos = []
     
-    @staticmethod
-    def generar_argumento_over_under(mercado, prob, analisis):
-        """Genera argumento para Over/Under"""
-        argumentos = []
+    for i in range(n_partidos):
+        # Simular equipos con diferentes niveles
+        local_nivel = np.random.uniform(0.3, 0.9)
+        visitante_nivel = np.random.uniform(0.3, 0.9)
         
-        detalles_local = analisis['detalles_local']
-        detalles_visitante = analisis['detalles_visitante']
-        stats_local = analisis['stats_local']
-        stats_visitante = analisis['stats_visitante']
+        # Features simuladas
+        features = {
+            'local_gf_promedio': local_nivel * 2.5 + np.random.normal(0, 0.3),
+            'local_gc_promedio': (1 - local_nivel) * 2.0 + np.random.normal(0, 0.3),
+            'visitante_gf_promedio': visitante_nivel * 2.0 + np.random.normal(0, 0.3),
+            'visitante_gc_promedio': (1 - visitante_nivel) * 2.0 + np.random.normal(0, 0.3),
+            'local_forma_5': local_nivel + np.random.normal(0, 0.1),
+            'local_forma_10': local_nivel + np.random.normal(0, 0.08),
+            'local_forma_20': local_nivel + np.random.normal(0, 0.05),
+            'visitante_forma_5': visitante_nivel + np.random.normal(0, 0.1),
+            'visitante_forma_10': visitante_nivel + np.random.normal(0, 0.08),
+            'visitante_forma_20': visitante_nivel + np.random.normal(0, 0.05),
+            'diff_forma': 0,
+            'local_en_casa_gf': local_nivel * 3.0 + np.random.normal(0, 0.4),
+            'local_en_casa_gc': (1 - local_nivel) * 1.8 + np.random.normal(0, 0.3),
+            'visitante_fuera_gf': visitante_nivel * 1.5 + np.random.normal(0, 0.3),
+            'visitante_fuera_gc': (1 - visitante_nivel) * 2.2 + np.random.normal(0, 0.3),
+            'local_posicion': int((1 - local_nivel) * 18 + 1),
+            'visitante_posicion': int((1 - visitante_nivel) * 18 + 1),
+            'diff_posicion': 0,
+            'local_puntos': int(local_nivel * 80),
+            'visitante_puntos': int(visitante_nivel * 80),
+            'diff_puntos': 0,
+            'local_racha_victorias': int(local_nivel * 3),
+            'visitante_racha_victorias': int(visitante_nivel * 3),
+            'local_over25_ratio': min(local_nivel + 0.2, 0.9),
+            'visitante_over25_ratio': min(visitante_nivel + 0.2, 0.9),
+            'local_btts_ratio': 0.5 + np.random.uniform(-0.2, 0.2),
+            'visitante_btts_ratio': 0.5 + np.random.uniform(-0.2, 0.2),
+            'h2h_local_victorias': np.random.randint(0, 5),
+            'h2h_empates': np.random.randint(0, 3),
+            'h2h_visitante_victorias': np.random.randint(0, 5),
+            'h2h_goles_promedio': 2.5 + np.random.normal(0, 0.5),
+            'local_eficiencia_ofensiva': 0,
+            'visitante_eficiencia_ofensiva': 0
+        }
         
-        goles_promedio_local = detalles_local['gf'] / 20
-        goles_promedio_visitante = detalles_visitante['gf'] / 20
+        features['diff_forma'] = features['local_forma_5'] - features['visitante_forma_5']
+        features['diff_posicion'] = features['visitante_posicion'] - features['local_posicion']
+        features['diff_puntos'] = features['local_puntos'] - features['visitante_puntos']
+        features['local_eficiencia_ofensiva'] = features['local_gf_promedio'] / max(features['local_gc_promedio'], 0.5)
+        features['visitante_eficiencia_ofensiva'] = features['visitante_gf_promedio'] / max(features['visitante_gc_promedio'], 0.5)
         
-        if "Over" in mercado:
-            threshold = float(mercado.split()[1])
-            
-            if goles_promedio_local + goles_promedio_visitante > threshold:
-                argumentos.append(f"⚽ Promedio combinado: {goles_promedio_local:.1f} + {goles_promedio_visitante:.1f} = {goles_promedio_local + goles_promedio_visitante:.1f} goles/partido")
-            
-            over25_local = stats_local['partidos_over25'] / 20
-            over25_visitante = stats_visitante['partidos_over25'] / 20
-            if threshold == 2.5 and (over25_local > 0.6 or over25_visitante > 0.6):
-                argumentos.append(f"📈 Tendencia alta de goles: {over25_local*100:.0f}% y {over25_visitante*100:.0f}% de sus partidos tienen Over 2.5")
-            
-            gc_promedio_local = detalles_local['gc'] / 20
-            gc_promedio_visitante = detalles_visitante['gc'] / 20
-            if gc_promedio_local > 1.2 and gc_promedio_visitante > 1.2:
-                argumentos.append(f"🥅 Ambos equipos encajan goles: {gc_promedio_local:.1f} y {gc_promedio_visitante:.1f} promedio")
+        # Simular resultado basado en nivel
+        prob_local = 0.45 + (local_nivel - visitante_nivel) * 0.3 + 0.15  # ventaja local
+        prob_empate = 0.25
+        prob_visitante = 1 - prob_local - prob_empate
         
-        else:  # Under
-            threshold = float(mercado.split()[1])
-            
-            if goles_promedio_local + goles_promedio_visitante < threshold:
-                argumentos.append(f"🔒 Bajo promedio combinado de goles: {goles_promedio_local + goles_promedio_visitante:.1f}")
-            
-            over25_local = stats_local['partidos_over25'] / 20
-            over25_visitante = stats_visitante['partidos_over25'] / 20
-            if threshold == 2.5 and (over25_local < 0.4 and over25_visitante < 0.4):
-                argumentos.append(f"📉 Pocos partidos con Over 2.5: solo {over25_local*100:.0f}% y {over25_visitante*100:.0f}%")
+        resultado = np.random.choice([0, 1, 2], p=[prob_visitante, prob_empate, prob_local])
         
-        return argumentos
+        if resultado == 2:  # Local gana
+            goles_local = np.random.poisson(features['local_gf_promedio'] * 1.2)
+            goles_visitante = np.random.poisson(features['visitante_gf_promedio'] * 0.8)
+        elif resultado == 1:  # Empate
+            media = (features['local_gf_promedio'] + features['visitante_gf_promedio']) / 2
+            goles_local = np.random.poisson(media)
+            goles_visitante = goles_local
+        else:  # Visitante gana
+            goles_local = np.random.poisson(features['local_gf_promedio'] * 0.8)
+            goles_visitante = np.random.poisson(features['visitante_gf_promedio'] * 1.2)
+        
+        partidos.append({
+            'local': f'Team_{i}_A',
+            'visitante': f'Team_{i}_B',
+            'goles_local': int(goles_local),
+            'goles_visitante': int(goles_visitante),
+            'features': features
+        })
     
-    @staticmethod
-    def generar_argumento_btts(si_no, prob, analisis):
-        """Genera argumento para BTTS"""
-        argumentos = []
-        
-        stats_local = analisis['stats_local']
-        stats_visitante = analisis['stats_visitante']
-        detalles_local = analisis['detalles_local']
-        detalles_visitante = analisis['detalles_visitante']
-        
-        if si_no == "Si":
-            btts_rate_local = stats_local['partidos_btts'] / 20
-            btts_rate_visitante = stats_visitante['partidos_btts'] / 20
-            
-            if btts_rate_local > 0.55 or btts_rate_visitante > 0.55:
-                argumentos.append(f"⚽⚽ Alta frecuencia BTTS: {btts_rate_local*100:.0f}% y {btts_rate_visitante*100:.0f}% en sus últimos 20 partidos")
-            
-            gf_local = detalles_local['gf'] / 20
-            gf_visitante = detalles_visitante['gf'] / 20
-            if gf_local > 1.2 and gf_visitante > 1.0:
-                argumentos.append(f"🎯 Ambos anotan regularmente: {gf_local:.1f} y {gf_visitante:.1f} goles/partido")
-            
-            gc_local = detalles_local['gc'] / 20
-            gc_visitante = detalles_visitante['gc'] / 20
-            if gc_local > 1.0 and gc_visitante > 1.0:
-                argumentos.append(f"🥅 Defensas vulnerables: encajan {gc_local:.1f} y {gc_visitante:.1f} goles/partido")
-        
-        else:  # No
-            btts_rate_local = stats_local['partidos_btts'] / 20
-            btts_rate_visitante = stats_visitante['partidos_btts'] / 20
-            
-            if btts_rate_local < 0.4 or btts_rate_visitante < 0.4:
-                argumentos.append(f"🔒 Baja frecuencia BTTS: solo {btts_rate_local*100:.0f}% y {btts_rate_visitante*100:.0f}%")
-            
-            gf_visitante = detalles_visitante['gf'] / 20
-            if gf_visitante < 0.8:
-                argumentos.append(f"📉 Visitante con bajo poder ofensivo: {gf_visitante:.1f} goles/partido")
-        
-        return argumentos
-    
-    @staticmethod
-    def generar_argumento_handicap(mercado, prob, analisis, local_team, visitante_team):
-        """Genera argumento para Handicap"""
-        argumentos = []
-        
-        if "Local" in mercado:
-            diff_posiciones = visitante_team['Posicion'] - local_team['Posicion']
-            if diff_posiciones > 8:
-                argumentos.append(f"📊 Superioridad clara: {local_team['Equipo']} está {diff_posiciones} posiciones arriba")
-            
-            detalles_local = analisis['detalles_local']
-            gf_local = detalles_local['gf'] / 20
-            gc_local = detalles_local['gc'] / 20
-            diff_goles = gf_local - gc_local
-            if diff_goles > 1.0:
-                argumentos.append(f"⚽ Excelente diferencia de goles: +{diff_goles:.1f} promedio")
-            
-            stats_local = analisis['stats_local']
-            if stats_local['local_pj'] >= 5:
-                gf_casa = stats_local['local_gf'] / stats_local['local_pj']
-                if gf_casa > 2.0:
-                    argumentos.append(f"🏠 Dominante en casa: {gf_casa:.1f} goles/partido de local")
-        
-        else:  # Visitante
-            stats_visitante = analisis['stats_visitante']
-            if stats_visitante['visitante_pj'] >= 5:
-                gc_fuera = stats_visitante['visitante_gc'] / stats_visitante['visitante_pj']
-                if gc_fuera < 1.2:
-                    argumentos.append(f"🛡️ Sólido defensivamente fuera: solo {gc_fuera:.1f} goles en contra/partido")
-        
-        return argumentos
-    
-    @staticmethod
-    def generar_argumento_primera_mitad(mercado, prob, analisis):
-        """Genera argumento para mercados de Primera Mitad"""
-        argumentos = []
-        
-        stats_local = analisis['stats_local']
-        stats_visitante = analisis['stats_visitante']
-        
-        goles_1h_local = stats_local['goles_1h_favor'] / 20
-        goles_1h_visitante = stats_visitante['goles_1h_favor'] / 20
-        
-        if "Gol" in mercado or "0.5" in mercado:
-            tasa_gol_1h_local = stats_local['partidos_gol_1h'] / 20
-            tasa_gol_1h_visitante = stats_visitante['partidos_gol_1h'] / 20
-            
-            if tasa_gol_1h_local > 0.6 or tasa_gol_1h_visitante > 0.6:
-                argumentos.append(f"⚡ Equipos que arrancan anotando: {tasa_gol_1h_local*100:.0f}% y {tasa_gol_1h_visitante*100:.0f}% anotan en 1H")
-            
-            if goles_1h_local + goles_1h_visitante > 0.8:
-                argumentos.append(f"🎯 Promedio combinado 1H: {goles_1h_local + goles_1h_visitante:.1f} goles")
-        
-        elif "1.5" in mercado:
-            if goles_1h_local + goles_1h_visitante > 1.0:
-                argumentos.append(f"⚽⚽ Ritmo alto en 1H: promedio {goles_1h_local + goles_1h_visitante:.1f} goles")
-        
-        return argumentos
-
-# ============================================================================
-# MÓDULO 4: CALCULADOR DE VALOR Y EV
-# ============================================================================
-
-class CalculadorValor:
-    """Calcula Expected Value (EV) y encuentra oportunidades de valor"""
-    
-    @staticmethod
-    def calcular_cuota_justa(probabilidad):
-        """Calcula la cuota justa sin margen de la casa"""
-        return 1 / max(probabilidad, 0.001)
-    
-    @staticmethod
-    def calcular_ev(probabilidad, cuota_mercado):
-        """
-        Calcula Expected Value (EV)
-        EV = (Probabilidad × Cuota) - 1
-        EV positivo = apuesta con valor
-        """
-        return (probabilidad * cuota_mercado) - 1
-    
-    @staticmethod
-    def encontrar_valor(mercados, margen_casa=0.05):
-        """
-        Encuentra apuestas con valor positivo
-        margen_casa: típicamente 5-10% para casas de apuestas
-        """
-        oportunidades = []
-        
-        for categoria, opciones in mercados.items():
-            if categoria == 'Top_Resultados' or categoria == 'Resultado_Exacto' or categoria == 'Prob_Exacto':
-                continue
-            
-            if isinstance(opciones, dict):
-                for mercado, prob in opciones.items():
-                    cuota_justa = CalculadorValor.calcular_cuota_justa(prob)
-                    cuota_esperada_mercado = cuota_justa * (1 - margen_casa)
-                    
-                    ev = CalculadorValor.calcular_ev(prob, cuota_esperada_mercado)
-                    
-                    # Solo incluir si tiene valor positivo significativo
-                    if ev > 0.02:  # Mínimo 2% de EV
-                        oportunidades.append({
-                            'Categoria': categoria,
-                            'Mercado': mercado,
-                            'Probabilidad': prob,
-                            'Cuota_Justa': cuota_justa,
-                            'Cuota_Min_Esperada': cuota_esperada_mercado,
-                            'EV': ev,
-                            'Confianza': CalculadorValor.calcular_confianza(prob, ev)
-                        })
-        
-        # Ordenar por EV descendente
-        oportunidades.sort(key=lambda x: x['EV'], reverse=True)
-        return oportunidades
-    
-    @staticmethod
-    def calcular_confianza(probabilidad, ev):
-        """
-        Calcula nivel de confianza basado en probabilidad y EV
-        """
-        if probabilidad > 0.6 and ev > 0.1:
-            return "⭐⭐⭐ MUY ALTA"
-        elif probabilidad > 0.5 and ev > 0.08:
-            return "⭐⭐ ALTA"
-        elif probabilidad > 0.4 and ev > 0.05:
-            return "⭐ MEDIA"
-        else:
-            return "⚠️ BAJA"
+    return partidos
 
 # ============================================================================
 # INTERFAZ STREAMLIT
 # ============================================================================
 
 def main():
-    st.title("⚽ SISTEMABETS IA v5.0 ULTRA PRO")
-    st.markdown("### Sistema de análisis predictivo con IA para apuestas deportivas")
+    st.title("⚽ SISTEMABETS ML v6.0 - Machine Learning REAL")
+    st.markdown("### Sistema predictivo con Random Forest y Gradient Boosting")
     
-    # Sidebar configuración
+    # Sidebar
     with st.sidebar:
-        st.header("⚙️ Configuración")
-        api_key = st.text_input("API Key Football-Data.org", type="password", 
-                               help="Obtén tu clave gratis en https://www.football-data.org/")
+        st.header("🤖 Machine Learning")
         
-        if not api_key:
-            st.warning("⚠️ Ingresa tu API Key para comenzar")
-            st.stop()
+        st.markdown("""
+        ### ¿Cómo funciona?
         
-        st.markdown("---")
-        st.markdown("### 📖 Glosario de Términos")
+        1. **Recolecta datos** de partidos históricos
+        2. **Extrae 33 features** (características)
+        3. **Entrena 3 modelos** independientes:
+           - Random Forest para 1X2
+           - Gradient Boosting para Over/Under
+           - Gradient Boosting para BTTS
+        4. **Predice** nuevos partidos
         
-        with st.expander("🎲 ¿Qué es Lambda (λ)?"):
-            st.markdown("""
-            **Lambda** es el parámetro fundamental de la distribución de Poisson.
-            
-            Representa el **promedio esperado de goles** que un equipo puede marcar.
-            
-            - **Lambda 2.0** = Se espera que el equipo anote 2 goles
-            - **Lambda 0.8** = Se espera que anote menos de 1 gol
-            
-            Se calcula combinando:
-            - Rendimiento ofensivo del equipo
-            - Rendimiento defensivo del rival
-            - Forma reciente
-            - Ventaja de local/visitante
-            """)
-        
-        with st.expander("💰 ¿Qué es el EV (Expected Value)?"):
-            st.markdown("""
-            **EV (Valor Esperado)** mide si una apuesta tiene valor matemático.
-            
-            **Fórmula:** EV = (Probabilidad × Cuota) - 1
-            
-            - **EV > 0** = Apuesta con valor (rentable a largo plazo)
-            - **EV = 0** = Cuota justa
-            - **EV < 0** = Sin valor (favorece a la casa)
-            
-            **Ejemplo:**
-            - Probabilidad 60% (0.60)
-            - Cuota de mercado: 1.80
-            - EV = (0.60 × 1.80) - 1 = 0.08 (+8% de valor)
-            
-            ✅ Un EV de +5% o más indica buena oportunidad
-            """)
-        
-        with st.expander("📊 ¿Por qué ver los 20 partidos?"):
-            st.markdown("""
-            Ver los últimos 20 partidos te permite:
-            
-            - ✅ Validar la forma actual del equipo
-            - ✅ Identificar patrones (rachas, goles, etc.)
-            - ✅ Ver rendimiento local vs visitante
-            - ✅ Analizar contra qué rivales jugó
-            - ✅ Detectar lesiones o cambios tácticos
-            
-            La IA usa estos datos para calcular probabilidades, 
-            pero TÚ puedes ver el contexto completo.
-            """)
-    
-    # Selección de liga
-    st.header("1️⃣ Selecciona la Liga")
-    liga_nombre = st.selectbox("Liga", list(FootballDataAPI.LIGAS.keys()))
-    liga_code = FootballDataAPI.LIGAS[liga_nombre]
-    
-    api = FootballDataAPI(api_key)
-    
-    # Cargar standings
-    with st.spinner("Cargando tabla de posiciones..."):
-        df_liga = api.obtener_standings(liga_code)
-    
-    if df_liga is None or df_liga.empty:
-        st.error("❌ No se pudo cargar la tabla. Verifica tu API Key o la liga seleccionada.")
-        st.stop()
-    
-    st.success(f"✅ Tabla de {liga_nombre} cargada correctamente")
-    
-    # Mostrar tabla
-    with st.expander("📊 Ver Tabla Completa"):
-        st.dataframe(df_liga[['Posicion', 'Equipo', 'PJ', 'Pts', 'GF', 'GC']], use_container_width=True)
-    
-    # Selección de equipos
-    st.header("2️⃣ Selecciona el Partido")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        equipo_local = st.selectbox("🏠 Equipo Local", df_liga['Equipo'].tolist())
-    
-    with col2:
-        equipos_visitante = [e for e in df_liga['Equipo'].tolist() if e != equipo_local]
-        equipo_visitante = st.selectbox("✈️ Equipo Visitante", equipos_visitante)
-    
-    # Botón de análisis
-    if st.button("🚀 ANALIZAR PARTIDO", type="primary", use_container_width=True):
-        
-        # Obtener datos de equipos
-        local_team = df_liga[df_liga['Equipo'] == equipo_local].iloc[0]
-        visitante_team = df_liga[df_liga['Equipo'] == equipo_visitante].iloc[0]
+        ### Ventajas vs Poisson:
+        - ✅ Aprende patrones complejos
+        - ✅ Considera múltiples variables
+        - ✅ Se adapta a diferentes ligas
+        - ✅ Mejora con más datos
+        """)
         
         st.markdown("---")
-        st.header(f"📊 Análisis: {equipo_local} vs {equipo_visitante}")
         
-        # Cargar historial
-        with st.spinner("Analizando últimos 20 partidos de cada equipo..."):
-            partidos_local = api.obtener_ultimos_20_partidos(equipo_local)
-            partidos_visitante = api.obtener_ultimos_20_partidos(equipo_visitante)
-            h2h = api.obtener_enfrentamientos_directos(equipo_local, equipo_visitante)
-        
-        # Calcular lambdas y análisis
-        lambda_local, lambda_visitante, analisis = AnalizadorUltraProfundo.calcular_lambdas_y_factores(
-            local_team, visitante_team, df_liga, partidos_local, partidos_visitante, h2h
+        # Configuración
+        n_partidos_entrenamiento = st.slider(
+            "Partidos para entrenar",
+            min_value=100,
+            max_value=2000,
+            value=500,
+            step=100,
+            help="Más partidos = mejor precisión (pero más lento)"
         )
         
-        # Mostrar parámetros de análisis
-        st.subheader("🔍 Parámetros de Análisis")
+        if st.button("🚀 ENTRENAR MODELO", type="primary"):
+            st.session_state['entrenar'] = True
+    
+    # PASO 1: ENTRENAR MODELO
+    if 'modelo_ml' not in st.session_state or st.session_state.get('entrenar', False):
         
-        col1, col2, col3 = st.columns(3)
+        st.header("🔄 Entrenando Modelo de Machine Learning...")
         
-        with col1:
-            st.metric("Lambda Local (λL)", f"{lambda_local:.2f}", 
-                     help="Goles esperados del equipo local. Mayor valor = más probabilidad de anotar")
-        with col2:
-            st.metric("Lambda Visitante (λV)", f"{lambda_visitante:.2f}",
-                     help="Goles esperados del equipo visitante")
-        with col3:
-            st.metric("Goles Esperados", f"{lambda_local + lambda_visitante:.2f}",
-                     help="Total de goles esperados en el partido")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        # Forma de equipos
-        st.subheader("📈 Forma Reciente (Últimos 20 Partidos)")
+        # Generar datos
+        status_text.text("📊 Generando datos históricos...")
+        progress_bar.progress(20)
+        
+        partidos_historicos = generar_datos_sinteticos(n_partidos_entrenamiento)
+        
+        # Crear dataset
+        status_text.text("🔧 Preparando features...")
+        progress_bar.progress(40)
+        
+        X, y_1x2, y_over25, y_btts = RecolectorDatos.crear_dataset_historico(partidos_historicos)
+        
+        # Entrenar
+        status_text.text("🤖 Entrenando modelos...")
+        progress_bar.progress(60)
+        
+        modelo_ml = ModeloML()
+        metricas = modelo_ml.entrenar(X, y_1x2, y_over25, y_btts)
+        
+        progress_bar.progress(100)
+        status_text.text("✅ ¡Entrenamiento completado!")
+        
+        # Guardar en session state
+        st.session_state['modelo_ml'] = modelo_ml
+        st.session_state['metricas'] = metricas
+        st.session_state['entrenar'] = False
+        
+        # Mostrar métricas
+        st.success("✅ Modelo entrenado exitosamente")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Partidos Entrenados", f"{metricas['n_samples']:,}")
+        col2.metric("Precisión 1X2", f"{metricas['accuracy_1x2']*100:.1f}%")
+        col3.metric("Precisión Over/Under", f"{metricas['accuracy_over25']*100:.1f}%")
+        col4.metric("Precisión BTTS", f"{metricas['accuracy_btts']*100:.1f}%")
+        
+        st.info("""
+        💡 **Interpretación de Precisión:**
+        - 50-55% = Apenas mejor que azar
+        - 55-60% = Precisión aceptable
+        - 60-65% = Buena precisión
+        - 65%+ = Excelente precisión (¡muy difícil de lograr!)
+        """)
+        
+        # Mostrar importancia de features
+        with st.expander("📊 Ver Importancia de Variables"):
+            importancia = modelo_ml.obtener_importancia_features()
+            st.dataframe(importancia, use_container_width=True)
+            
+            st.caption("""
+            **Las variables más importantes** son las que el modelo usa más para tomar decisiones.
+            Por ejemplo, si 'diff_forma' tiene alta importancia, significa que la diferencia de forma
+            entre equipos es crucial para predecir el resultado.
+            """)
+    
+    # PASO 2: HACER PREDICCIONES
+    if 'modelo_ml' in st.session_state:
+        
+        st.markdown("---")
+        st.header("🎯 Predecir Partido")
+        
+        st.info("ℹ️ **MODO DEMO:** Ingresa stats manualmente. En producción, esto se obtendría automáticamente de una API.")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown(f"**🏠 {equipo_local}**")
-            forma_local = analisis['forma_local']
-            detalles_local = analisis['detalles_local']
-            
-            st.progress(forma_local)
-            st.caption(f"Forma: {forma_local*100:.1f}%")
-            
-            st.markdown(f"""
-            - ✅ Victorias: **{detalles_local['victorias']}**
-            - 🟰 Empates: **{detalles_local['empates']}**
-            - ❌ Derrotas: **{detalles_local['derrotas']}**
-            - ⚽ Goles a favor: **{detalles_local['gf']}** ({detalles_local['gf']/20:.1f}/partido)
-            - 🥅 Goles en contra: **{detalles_local['gc']}** ({detalles_local['gc']/20:.1f}/partido)
-            - 🔥 Racha (últimos 5): {detalles_local['racha_actual']}
-            """)
+            st.subheader("🏠 Equipo Local")
+            local_gf = st.number_input("Goles a favor (promedio)", min_value=0.0, max_value=5.0, value=1.8, step=0.1, key='local_gf')
+            local_gc = st.number_input("Goles en contra (promedio)", min_value=0.0, max_value=5.0, value=1.2, step=0.1, key='local_gc')
+            local_forma = st.slider("Forma reciente (0-1)", 0.0, 1.0, 0.65, 0.05, key='local_forma')
+            local_pos = st.number_input("Posición en tabla", min_value=1, max_value=20, value=5, key='local_pos')
+            local_pts = st.number_input("Puntos", min_value=0, max_value=100, value=45, key='local_pts')
+            local_racha = st.number_input("Racha victorias (últimos 3)", min_value=0, max_value=3, value=2, key='local_racha')
         
         with col2:
-            st.markdown(f"**✈️ {equipo_visitante}**")
-            forma_visitante = analisis['forma_visitante']
-            detalles_visitante = analisis['detalles_visitante']
-            
-            st.progress(forma_visitante)
-            st.caption(f"Forma: {forma_visitante*100:.1f}%")
-            
-            st.markdown(f"""
-            - ✅ Victorias: **{detalles_visitante['victorias']}**
-            - 🟰 Empates: **{detalles_visitante['empates']}**
-            - ❌ Derrotas: **{detalles_visitante['derrotas']}**
-            - ⚽ Goles a favor: **{detalles_visitante['gf']}** ({detalles_visitante['gf']/20:.1f}/partido)
-            - 🥅 Goles en contra: **{detalles_visitante['gc']}** ({detalles_visitante['gc']/20:.1f}/partido)
-            - 🔥 Racha (últimos 5): {detalles_visitante['racha_actual']}
-            """)
+            st.subheader("✈️ Equipo Visitante")
+            visitante_gf = st.number_input("Goles a favor (promedio)", min_value=0.0, max_value=5.0, value=1.5, step=0.1, key='visit_gf')
+            visitante_gc = st.number_input("Goles en contra (promedio)", min_value=0.0, max_value=5.0, value=1.4, step=0.1, key='visit_gc')
+            visitante_forma = st.slider("Forma reciente (0-1)", 0.0, 1.0, 0.55, 0.05, key='visit_forma')
+            visitante_pos = st.number_input("Posición en tabla", min_value=1, max_value=20, value=8, key='visit_pos')
+            visitante_pts = st.number_input("Puntos", min_value=0, max_value=100, value=38, key='visit_pts')
+            visitante_racha = st.number_input("Racha victorias (últimos 3)", min_value=0, max_value=3, value=1, key='visit_racha')
         
-        # Botones para ver historial completo
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button(f"📋 Ver 20 partidos de {equipo_local}"):
-                st.markdown("### Últimos 20 partidos:")
-                for i, p in enumerate(partidos_local[:20], 1):
-                    resultado = "V" if (p['local'] == equipo_local and p['goles_local'] > p['goles_visitante']) or \
-                                     (p['visitante'] == equipo_local and p['goles_visitante'] > p['goles_local']) else \
-                               "E" if p['goles_local'] == p['goles_visitante'] else "D"
-                    
-                    emoji = "✅" if resultado == "V" else "🟰" if resultado == "E" else "❌"
-                    
-                    st.caption(f"{emoji} {i}. {p['local']} {p['goles_local']}-{p['goles_visitante']} {p['visitante']} | {p['competicion']}")
-        
-        with col2:
-            if st.button(f"📋 Ver 20 partidos de {equipo_visitante}"):
-                st.markdown("### Últimos 20 partidos:")
-                for i, p in enumerate(partidos_visitante[:20], 1):
-                    resultado = "V" if (p['local'] == equipo_visitante and p['goles_local'] > p['goles_visitante']) or \
-                                     (p['visitante'] == equipo_visitante and p['goles_visitante'] > p['goles_local']) else \
-                               "E" if p['goles_local'] == p['goles_visitante'] else "D"
-                    
-                    emoji = "✅" if resultado == "V" else "🟰" if resultado == "E" else "❌"
-                    
-                    st.caption(f"{emoji} {i}. {p['local']} {p['goles_local']}-{p['goles_visitante']} {p['visitante']} | {p['competicion']}")
-        
-        # H2H
-        if h2h:
-            st.subheader("🎯 Enfrentamientos Directos (H2H)")
-            st.caption(f"Últimos {len(h2h)} enfrentamientos:")
+        if st.button("🔮 PREDECIR RESULTADO", type="primary", use_container_width=True):
             
-            victorias_local_h2h = sum(1 for p in h2h if 
-                (p['local'] == equipo_local and p['goles_local'] > p['goles_visitante']) or
-                (p['visitante'] == equipo_local and p['goles_visitante'] > p['goles_local'])
-            )
-            empates_h2h = sum(1 for p in h2h if p['goles_local'] == p['goles_visitante'])
-            victorias_visitante_h2h = len(h2h) - victorias_local_h2h - empates_h2h
+            # Construir features
+            features = {
+                'local_gf_promedio': local_gf,
+                'local_gc_promedio': local_gc,
+                'visitante_gf_promedio': visitante_gf,
+                'visitante_gc_promedio': visitante_gc,
+                'local_forma_5': local_forma,
+                'local_forma_10': local_forma * 0.95,
+                'local_forma_20': local_forma * 0.90,
+                'visitante_forma_5': visitante_forma,
+                'visitante_forma_10': visitante_forma * 0.95,
+                'visitante_forma_20': visitante_forma * 0.90,
+                'diff_forma': local_forma - visitante_forma,
+                'local_en_casa_gf': local_gf * 1.15,
+                'local_en_casa_gc': local_gc * 0.95,
+                'visitante_fuera_gf': visitante_gf * 0.85,
+                'visitante_fuera_gc': visitante_gc * 1.10,
+                'local_posicion': local_pos,
+                'visitante_posicion': visitante_pos,
+                'diff_posicion': visitante_pos - local_pos,
+                'local_puntos': local_pts,
+                'visitante_puntos': visitante_pts,
+                'diff_puntos': local_pts - visitante_pts,
+                'local_racha_victorias': local_racha,
+                'visitante_racha_victorias': visitante_racha,
+                'local_over25_ratio': 0.55,
+                'visitante_over25_ratio': 0.50,
+                'local_btts_ratio': 0.52,
+                'visitante_btts_ratio': 0.48,
+                'h2h_local_victorias': 0,
+                'h2h_empates': 0,
+                'h2h_visitante_victorias': 0,
+                'h2h_goles_promedio': 2.5,
+                'local_eficiencia_ofensiva': local_gf / max(local_gc, 0.5),
+                'visitante_eficiencia_ofensiva': visitante_gf / max(visitante_gc, 0.5)
+            }
             
+            # Predecir
+            modelo_ml = st.session_state['modelo_ml']
+            predicciones = modelo_ml.predecir(features)
+            
+            # Mostrar resultados
+            st.markdown("---")
+            st.header("🎯 PREDICCIONES DEL MODELO ML")
+            
+            # 1X2
+            st.subheader("⚽ Resultado Final (1X2)")
             col1, col2, col3 = st.columns(3)
-            col1.metric(f"Victorias {equipo_local}", victorias_local_h2h)
-            col2.metric("Empates", empates_h2h)
-            col3.metric(f"Victorias {equipo_visitante}", victorias_visitante_h2h)
             
-            for p in h2h[:5]:
-                st.caption(f"{p['local']} {p['goles_local']}-{p['goles_visitante']} {p['visitante']} | {p['competicion']}")
-        
-        # Calcular matriz y mercados
-        matriz = AnalizadorUltraProfundo.matriz_probabilidades(lambda_local, lambda_visitante)
-        mercados = AnalizadorUltraProfundo.calcular_mercados_extendidos(
-            matriz, analisis['stats_local'], analisis['stats_visitante'], lambda_local, lambda_visitante
-        )
-        
-        # Mostrar pronósticos
-        st.markdown("---")
-        st.header("🎯 Pronósticos y Probabilidades")
-        
-        # 1X2
-        st.subheader("⚽ Resultado Final (1X2)")
-        col1, col2, col3 = st.columns(3)
-        
-        probs_1x2 = mercados['1X2']
-        
-        with col1:
-            st.metric(f"Victoria {equipo_local}", f"{probs_1x2['Local']*100:.1f}%")
-        with col2:
-            st.metric("Empate", f"{probs_1x2['Empate']*100:.1f}%")
-        with col3:
-            st.metric(f"Victoria {equipo_visitante}", f"{probs_1x2['Visitante']*100:.1f}%")
-        
-        # Over/Under
-        st.subheader("📊 Over/Under Goles")
-        ou = mercados['Over/Under']
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            for key in ['Over 0.5', 'Over 1.5', 'Over 2.5']:
-                st.metric(key, f"{ou[key]*100:.1f}%")
-        
-        with col2:
-            for key in ['Over 3.5', 'Over 4.5']:
-                st.metric(key, f"{ou[key]*100:.1f}%")
-        
-        # BTTS
-        st.subheader("🎯 Ambos Equipos Anotan (BTTS)")
-        btts = mercados['BTTS']
-        col1, col2 = st.columns(2)
-        col1.metric("BTTS Sí", f"{btts['Si']*100:.1f}%")
-        col2.metric("BTTS No", f"{btts['No']*100:.1f}%")
-        
-        # Handicap
-        st.subheader("⚖️ Handicap Asiático")
-        hcp = mercados['Handicap']
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Local -0.5", f"{hcp['Local -0.5']*100:.1f}%")
-            st.metric("Local -1.5", f"{hcp['Local -1.5']*100:.1f}%")
-        with col2:
-            st.metric("Visitante +0.5", f"{hcp['Visitante +0.5']*100:.1f}%")
-            st.metric("Visitante +1.5", f"{hcp['Visitante +1.5']*100:.1f}%")
-        
-        # Primera Mitad
-        st.subheader("⏱️ Primera Mitad")
-        pm = mercados['Primera_Mitad']
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Gol en 1H", f"{pm['Gol en 1H']*100:.1f}%")
-        col2.metric("Más de 0.5 goles 1H", f"{pm['Más de 0.5 goles 1H']*100:.1f}%")
-        col3.metric("Más de 1.5 goles 1H", f"{pm['Más de 1.5 goles 1H']*100:.1f}%")
-        
-        # Resultado exacto
-        st.subheader("🎲 Resultados Más Probables")
-        top_res = mercados['Top_Resultados']
-        
-        cols = st.columns(5)
-        for i, res in enumerate(top_res):
-            with cols[i]:
-                st.metric(res['Marcador'], f"{res['Probabilidad']*100:.1f}%")
-        
-        # MEJORES OPORTUNIDADES
-        st.markdown("---")
-        st.header("💎 MEJORES OPORTUNIDADES DE APUESTA")
-        st.caption("*Apuestas con alto Expected Value (EV) y probabilidades favorables*")
-        
-        oportunidades = CalculadorValor.encontrar_valor(mercados, margen_casa=0.05)
-        
-        if not oportunidades:
-            st.warning("⚠️ No se encontraron oportunidades con valor positivo significativo en este momento.")
-        else:
-            # Top 5 oportunidades
-            st.subheader("🏆 Top 5 Apuestas con Mejor Valor")
-            
-            for i, op in enumerate(oportunidades[:5], 1):
-                with st.expander(f"#{i} - {op['Categoria']}: {op['Mercado']} | EV: +{op['EV']*100:.1f}% {op['Confianza']}"):
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Probabilidad", f"{op['Probabilidad']*100:.1f}%")
-                    with col2:
-                        st.metric("Cuota Justa", f"{op['Cuota_Justa']:.2f}")
-                    with col3:
-                        st.metric("Expected Value", f"+{op['EV']*100:.1f}%")
-                    
-                    st.caption(f"**Cuota mínima esperada en el mercado:** {op['Cuota_Min_Esperada']:.2f}")
-                    st.caption(f"*Si encuentras una cuota igual o mayor a {op['Cuota_Min_Esperada']:.2f}, hay valor en esta apuesta*")
-                    
-                    # Generar argumentos
-                    if op['Categoria'] == '1X2':
-                        resultado = op['Mercado']
-                        argumentos = GeneradorArgumentos.generar_argumento_1x2(
-                            resultado, op['Probabilidad'], local_team, visitante_team, analisis
-                        )
-                    elif op['Categoria'] == 'Over/Under':
-                        argumentos = GeneradorArgumentos.generar_argumento_over_under(
-                            op['Mercado'], op['Probabilidad'], analisis
-                        )
-                    elif op['Categoria'] == 'BTTS':
-                        si_no = op['Mercado']
-                        argumentos = GeneradorArgumentos.generar_argumento_btts(
-                            si_no, op['Probabilidad'], analisis
-                        )
-                    elif op['Categoria'] == 'Handicap':
-                        argumentos = GeneradorArgumentos.generar_argumento_handicap(
-                            op['Mercado'], op['Probabilidad'], analisis, local_team, visitante_team
-                        )
-                    elif op['Categoria'] == 'Primera_Mitad':
-                        argumentos = GeneradorArgumentos.generar_argumento_primera_mitad(
-                            op['Mercado'], op['Probabilidad'], analisis
-                        )
-                    else:
-                        argumentos = []
-                    
-                    if argumentos:
-                        st.markdown("**🔍 Argumentos:**")
-                        for arg in argumentos:
-                            st.markdown(f"- {arg}")
-                    
-                    # Veredicto final
-                    st.markdown("---")
-                    st.markdown("### ⚖️ VEREDICTO FINAL")
-                    
-                    confianza_nivel = ""
-                    if op['Confianza'] == "⭐⭐⭐ MUY ALTA":
-                        confianza_nivel = "🟢 **APUESTA RECOMENDADA** - Alta probabilidad y excelente valor matemático"
-                    elif op['Confianza'] == "⭐⭐ ALTA":
-                        confianza_nivel = "🟡 **BUENA OPORTUNIDAD** - Probabilidad sólida con buen valor"
-                    elif op['Confianza'] == "⭐ MEDIA":
-                        confianza_nivel = "🟠 **CONSIDERAR** - Valor presente pero requiere análisis adicional"
-                    else:
-                        confianza_nivel = "🔴 **PRECAUCIÓN** - Valor marginal, solo para apostadores experimentados"
-                    
-                    st.markdown(confianza_nivel)
-                    
-                    if op['EV'] > 0.15:
-                        st.success("✅ Esta apuesta tiene un valor excepcional (+15% EV o más). Muy recomendada si encuentras la cuota adecuada.")
-                    elif op['EV'] > 0.08:
-                        st.info("ℹ️ Valor positivo significativo. Buena oportunidad para considerar.")
-                    else:
-                        st.warning("⚠️ Valor positivo pero moderado. Evalúa las cuotas del mercado antes de apostar.")
-        
-        # APUESTAS DE ALTA PROBABILIDAD
-        st.markdown("---")
-        st.header("✅ APUESTAS DE ALTA PROBABILIDAD")
-        st.caption("*Apuestas con más del 60% de probabilidad de éxito*")
-        
-        apuestas_seguras = []
-        
-        for categoria, opciones in mercados.items():
-            if categoria in ['Top_Resultados', 'Resultado_Exacto', 'Prob_Exacto']:
-                continue
-            
-            if isinstance(opciones, dict):
-                for mercado, prob in opciones.items():
-                    if prob > 0.60:
-                        apuestas_seguras.append({
-                            'Categoria': categoria,
-                            'Mercado': mercado,
-                            'Probabilidad': prob,
-                            'Cuota_Justa': CalculadorValor.calcular_cuota_justa(prob)
-                        })
-        
-        apuestas_seguras.sort(key=lambda x: x['Probabilidad'], reverse=True)
-        
-        if not apuestas_seguras:
-            st.info("ℹ️ No hay apuestas con probabilidad superior al 60% en este partido.")
-        else:
-            for i, apuesta in enumerate(apuestas_seguras[:8], 1):
-                with st.expander(f"#{i} - {apuesta['Categoria']}: {apuesta['Mercado']} | Probabilidad: {apuesta['Probabilidad']*100:.1f}%"):
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.metric("Probabilidad de Éxito", f"{apuesta['Probabilidad']*100:.1f}%")
-                    with col2:
-                        st.metric("Cuota Justa", f"{apuesta['Cuota_Justa']:.2f}")
-                    
-                    st.caption(f"**Cuota esperada en el mercado:** ~{apuesta['Cuota_Justa']*0.95:.2f}")
-                    
-                    # Generar argumentos
-                    if apuesta['Categoria'] == '1X2':
-                        argumentos = GeneradorArgumentos.generar_argumento_1x2(
-                            apuesta['Mercado'], apuesta['Probabilidad'], local_team, visitante_team, analisis
-                        )
-                    elif apuesta['Categoria'] == 'Over/Under':
-                        argumentos = GeneradorArgumentos.generar_argumento_over_under(
-                            apuesta['Mercado'], apuesta['Probabilidad'], analisis
-                        )
-                    elif apuesta['Categoria'] == 'BTTS':
-                        argumentos = GeneradorArgumentos.generar_argumento_btts(
-                            apuesta['Mercado'], apuesta['Probabilidad'], analisis
-                        )
-                    elif apuesta['Categoria'] == 'Handicap':
-                        argumentos = GeneradorArgumentos.generar_argumento_handicap(
-                            apuesta['Mercado'], apuesta['Probabilidad'], analisis, local_team, visitante_team
-                        )
-                    elif apuesta['Categoria'] == 'Primera_Mitad':
-                        argumentos = GeneradorArgumentos.generar_argumento_primera_mitad(
-                            apuesta['Mercado'], apuesta['Probabilidad'], analisis
-                        )
-                    else:
-                        argumentos = []
-                    
-                    if argumentos:
-                        st.markdown("**🔍 Argumentos:**")
-                        for arg in argumentos:
-                            st.markdown(f"- {arg}")
-                    
-                    # Veredicto
-                    st.markdown("---")
-                    st.markdown("### ⚖️ VEREDICTO")
-                    
-                    if apuesta['Probabilidad'] > 0.80:
-                        st.success("🟢 **MUY PROBABLE** - Altísima probabilidad de éxito, pero cuotas bajas esperadas.")
-                    elif apuesta['Probabilidad'] > 0.70:
-                        st.info("🔵 **ALTA PROBABILIDAD** - Buena opción para apuestas conservadoras.")
-                    else:
-                        st.warning("🟡 **PROBABILIDAD MODERADA-ALTA** - Equilibrio entre probabilidad y cuota.")
-        
-        # ANÁLISIS ESTADÍSTICO DETALLADO
-        st.markdown("---")
-        st.header("📈 Análisis Estadístico Detallado")
-        
-        tab1, tab2, tab3 = st.tabs(["📊 Rendimiento Local/Visitante", "🎯 Estadísticas Clave", "🔥 Tendencias"])
-        
-        with tab1:
-            col1, col2 = st.columns(2)
+            prob_local = predicciones['1X2']['Local']
+            prob_empate = predicciones['1X2']['Empate']
+            prob_visitante = predicciones['1X2']['Visitante']
             
             with col1:
-                st.markdown(f"### 🏠 {equipo_local} (Local)")
-                stats_local = analisis['stats_local']
-                
-                if stats_local['local_pj'] > 0:
-                    st.markdown(f"""
-                    **Partidos de Local:** {stats_local['local_pj']}
-                    - ✅ Victorias: {stats_local['local_victorias']} ({stats_local['local_victorias']/stats_local['local_pj']*100:.0f}%)
-                    - ⚽ Goles a favor: {stats_local['local_gf']} ({stats_local['local_gf']/stats_local['local_pj']:.1f}/partido)
-                    - 🥅 Goles en contra: {stats_local['local_gc']} ({stats_local['local_gc']/stats_local['local_pj']:.1f}/partido)
-                    - 📊 Diferencia: {(stats_local['local_gf'] - stats_local['local_gc'])/stats_local['local_pj']:.1f} goles/partido
-                    """)
-                else:
-                    st.info("Sin datos suficientes de partidos como local")
+                st.metric("Victoria Local", f"{prob_local*100:.1f}%")
+                cuota_local = 1 / prob_local
+                st.caption(f"Cuota justa: {cuota_local:.2f}")
             
             with col2:
-                st.markdown(f"### ✈️ {equipo_visitante} (Visitante)")
-                stats_visitante = analisis['stats_visitante']
-                
-                if stats_visitante['visitante_pj'] > 0:
-                    st.markdown(f"""
-                    **Partidos de Visitante:** {stats_visitante['visitante_pj']}
-                    - ✅ Victorias: {stats_visitante['visitante_victorias']} ({stats_visitante['visitante_victorias']/stats_visitante['visitante_pj']*100:.0f}%)
-                    - ⚽ Goles a favor: {stats_visitante['visitante_gf']} ({stats_visitante['visitante_gf']/stats_visitante['visitante_pj']:.1f}/partido)
-                    - 🥅 Goles en contra: {stats_visitante['visitante_gc']} ({stats_visitante['visitante_gc']/stats_visitante['visitante_pj']:.1f}/partido)
-                    - 📊 Diferencia: {(stats_visitante['visitante_gf'] - stats_visitante['visitante_gc'])/stats_visitante['visitante_pj']:.1f} goles/partido
-                    """)
-                else:
-                    st.info("Sin datos suficientes de partidos como visitante")
-        
-        with tab2:
+                st.metric("Empate", f"{prob_empate*100:.1f}%")
+                cuota_empate = 1 / prob_empate
+                st.caption(f"Cuota justa: {cuota_empate:.2f}")
+            
+            with col3:
+                st.metric("Victoria Visitante", f"{prob_visitante*100:.1f}%")
+                cuota_visitante = 1 / prob_visitante
+                st.caption(f"Cuota justa: {cuota_visitante:.2f}")
+            
+            # Recomendación 1X2
+            max_prob_1x2 = max(prob_local, prob_empate, prob_visitante)
+            if max_prob_1x2 == prob_local:
+                resultado_recomendado = "Victoria Local"
+                confianza_1x2 = prob_local
+            elif max_prob_1x2 == prob_empate:
+                resultado_recomendado = "Empate"
+                confianza_1x2 = prob_empate
+            else:
+                resultado_recomendado = "Victoria Visitante"
+                confianza_1x2 = prob_visitante
+            
+            if confianza_1x2 > 0.55:
+                st.success(f"✅ **Recomendación ML:** {resultado_recomendado} ({confianza_1x2*100:.1f}% confianza)")
+            else:
+                st.warning(f"⚠️ **Partido muy igualado** - El modelo no tiene una predicción clara (máx {confianza_1x2*100:.1f}%)")
+            
+            # Over/Under
+            st.subheader("📊 Over/Under 2.5 Goles")
             col1, col2 = st.columns(2)
             
+            prob_over = predicciones['Over/Under']['Over 2.5']
+            prob_under = predicciones['Over/Under']['Under 2.5']
+            
             with col1:
-                st.markdown(f"### {equipo_local}")
-                st.metric("Over 2.5 en últimos 20", f"{analisis['stats_local']['partidos_over25']/20*100:.0f}%")
-                st.metric("BTTS en últimos 20", f"{analisis['stats_local']['partidos_btts']/20*100:.0f}%")
-                st.metric("Goles en 1H (promedio)", f"{analisis['stats_local']['goles_1h_favor']/20:.1f}")
-                st.metric("% partidos con gol en 1H", f"{analisis['stats_local']['partidos_gol_1h']/20*100:.0f}%")
+                st.metric("Over 2.5", f"{prob_over*100:.1f}%")
+                st.caption(f"Cuota justa: {1/prob_over:.2f}")
             
             with col2:
-                st.markdown(f"### {equipo_visitante}")
-                st.metric("Over 2.5 en últimos 20", f"{analisis['stats_visitante']['partidos_over25']/20*100:.0f}%")
-                st.metric("BTTS en últimos 20", f"{analisis['stats_visitante']['partidos_btts']/20*100:.0f}%")
-                st.metric("Goles en 1H (promedio)", f"{analisis['stats_visitante']['goles_1h_favor']/20:.1f}")
-                st.metric("% partidos con gol en 1H", f"{analisis['stats_visitante']['partidos_gol_1h']/20*100:.0f}%")
-        
-        with tab3:
-            st.subheader("🔥 Tendencias Detectadas")
+                st.metric("Under 2.5", f"{prob_under*100:.1f}%")
+                st.caption(f"Cuota justa: {1/prob_under:.2f}")
             
-            tendencias = []
-            
-            # Over 2.5
-            over25_combinado = (analisis['stats_local']['partidos_over25'] + analisis['stats_visitante']['partidos_over25']) / 40
-            if over25_combinado > 0.6:
-                tendencias.append("🔥 **ALTA TENDENCIA A OVER 2.5** - Ambos equipos involucrados en partidos con muchos goles")
-            elif over25_combinado < 0.35:
-                tendencias.append("❄️ **PARTIDOS CERRADOS** - Tendencia a pocos goles en ambos equipos")
+            if prob_over > 0.60:
+                st.success(f"✅ **Recomendación ML:** Over 2.5 ({prob_over*100:.1f}% confianza)")
+            elif prob_under > 0.60:
+                st.success(f"✅ **Recomendación ML:** Under 2.5 ({prob_under*100:.1f}% confianza)")
+            else:
+                st.info(f"ℹ️ **Sin recomendación clara** - Probabilidades balanceadas")
             
             # BTTS
-            btts_combinado = (analisis['stats_local']['partidos_btts'] + analisis['stats_visitante']['partidos_btts']) / 40
-            if btts_combinado > 0.55:
-                tendencias.append("⚽⚽ **ALTA PROBABILIDAD BTTS** - Ambos equipos suelen anotar y recibir goles")
-            elif btts_combinado < 0.35:
-                tendencias.append("🛡️ **DEFENSAS SÓLIDAS** - Uno o ambos equipos mantienen portería en cero frecuentemente")
+            st.subheader("🎯 Ambos Equipos Anotan (BTTS)")
+            col1, col2 = st.columns(2)
             
-            # Primera mitad
-            gol_1h_combinado = (analisis['stats_local']['partidos_gol_1h'] + analisis['stats_visitante']['partidos_gol_1h']) / 40
-            if gol_1h_combinado > 0.65:
-                tendencias.append("⚡ **INICIOS EXPLOSIVOS** - Alta probabilidad de goles en primera mitad")
+            prob_btts_si = predicciones['BTTS']['Si']
+            prob_btts_no = predicciones['BTTS']['No']
             
-            # Forma
-            if analisis['forma_local'] > 0.7 and analisis['forma_visitante'] < 0.4:
-                tendencias.append(f"📈 **{equipo_local} EN RACHA GANADORA** vs equipo en baja forma")
-            elif analisis['forma_visitante'] > 0.7 and analisis['forma_local'] < 0.4:
-                tendencias.append(f"📈 **{equipo_visitante} EN RACHA GANADORA** vs equipo en baja forma")
-            elif abs(analisis['forma_local'] - analisis['forma_visitante']) < 0.1:
-                tendencias.append("⚖️ **EQUIPOS MUY IGUALADOS** - Forma similar, partido abierto")
+            with col1:
+                st.metric("BTTS Sí", f"{prob_btts_si*100:.1f}%")
+                st.caption(f"Cuota justa: {1/prob_btts_si:.2f}")
             
-            # Diferencia de tabla
-            if abs(local_team['Posicion'] - visitante_team['Posicion']) > 10:
-                if local_team['Posicion'] < visitante_team['Posicion']:
-                    tendencias.append(f"⭐ **{equipo_local} FAVORITO CLARO** - Gran diferencia en la tabla")
-                else:
-                    tendencias.append(f"⭐ **{equipo_visitante} FAVORITO CLARO** - Gran diferencia en la tabla")
+            with col2:
+                st.metric("BTTS No", f"{prob_btts_no*100:.1f}%")
+                st.caption(f"Cuota justa: {1/prob_btts_no:.2f}")
             
-            if tendencias:
-                for tend in tendencias:
-                    st.markdown(f"- {tend}")
+            if prob_btts_si > 0.60:
+                st.success(f"✅ **Recomendación ML:** BTTS Sí ({prob_btts_si*100:.1f}% confianza)")
+            elif prob_btts_no > 0.60:
+                st.success(f"✅ **Recomendación ML:** BTTS No ({prob_btts_no*100:.1f}% confianza)")
             else:
-                st.info("No se detectaron tendencias significativas")
+                st.info(f"ℹ️ **Sin recomendación clara**")
+            
+            # COMPARACIÓN ML vs POISSON
+            st.markdown("---")
+            st.header("🆚 Comparación: ML vs Poisson Clásico")
+            
+            # Calcular Poisson para comparar
+            lambda_local = (local_gf * 1.15) * (visitante_gc * 1.10) / ((local_gf + visitante_gf) / 2)
+            lambda_visitante = (visitante_gf * 0.85) * (local_gc * 0.95) / ((local_gf + visitante_gf) / 2)
+            
+            # Matriz Poisson
+            matriz = np.zeros((6, 6))
+            for i in range(6):
+                for j in range(6):
+                    matriz[i, j] = poisson.pmf(i, lambda_local) * poisson.pmf(j, lambda_visitante)
+            
+            prob_local_poisson = np.sum(np.tril(matriz, -1))
+            prob_empate_poisson = np.sum(np.diag(matriz))
+            prob_visitante_poisson = np.sum(np.triu(matriz, 1))
+            
+            total = prob_local_poisson + prob_empate_poisson + prob_visitante_poisson
+            prob_local_poisson /= total
+            prob_empate_poisson /= total
+            prob_visitante_poisson /= total
+            
+            # Over/Under Poisson
+            prob_over_poisson = sum([matriz[i, j] for i in range(6) for j in range(6) if (i+j) > 2.5])
+            prob_under_poisson = 1 - prob_over_poisson
+            
+            # BTTS Poisson
+            prob_btts_no_poisson = matriz[0,:].sum() + matriz[:,0].sum() - matriz[0,0]
+            prob_btts_si_poisson = 1 - prob_btts_no_poisson
+            
+            # Tabla comparativa
+            df_comparacion = pd.DataFrame({
+                'Mercado': [
+                    'Victoria Local',
+                    'Empate',
+                    'Victoria Visitante',
+                    'Over 2.5',
+                    'Under 2.5',
+                    'BTTS Sí',
+                    'BTTS No'
+                ],
+                'Machine Learning': [
+                    f"{prob_local*100:.1f}%",
+                    f"{prob_empate*100:.1f}%",
+                    f"{prob_visitante*100:.1f}%",
+                    f"{prob_over*100:.1f}%",
+                    f"{prob_under*100:.1f}%",
+                    f"{prob_btts_si*100:.1f}%",
+                    f"{prob_btts_no*100:.1f}%"
+                ],
+                'Poisson Clásico': [
+                    f"{prob_local_poisson*100:.1f}%",
+                    f"{prob_empate_poisson*100:.1f}%",
+                    f"{prob_visitante_poisson*100:.1f}%",
+                    f"{prob_over_poisson*100:.1f}%",
+                    f"{prob_under_poisson*100:.1f}%",
+                    f"{prob_btts_si_poisson*100:.1f}%",
+                    f"{prob_btts_no_poisson*100:.1f}%"
+                ],
+                'Diferencia': [
+                    f"{abs(prob_local - prob_local_poisson)*100:.1f}%",
+                    f"{abs(prob_empate - prob_empate_poisson)*100:.1f}%",
+                    f"{abs(prob_visitante - prob_visitante_poisson)*100:.1f}%",
+                    f"{abs(prob_over - prob_over_poisson)*100:.1f}%",
+                    f"{abs(prob_under - prob_under_poisson)*100:.1f}%",
+                    f"{abs(prob_btts_si - prob_btts_si_poisson)*100:.1f}%",
+                    f"{abs(prob_btts_no - prob_btts_no_poisson)*100:.1f}%"
+                ]
+            })
+            
+            st.dataframe(df_comparacion, use_container_width=True)
+            
+            st.info("""
+            💡 **Interpretación:**
+            - **Diferencias pequeñas (0-5%):** Ambos modelos coinciden
+            - **Diferencias moderadas (5-15%):** ML detectó patrones que Poisson no
+            - **Diferencias grandes (15%+):** ML está considerando factores importantes (forma, posición, etc.)
+            
+            **¿Cuál usar?**
+            - Si la diferencia es pequeña → Confía en ambos
+            - Si ML tiene mayor confianza (>60%) → Prefiere ML
+            - Si ambos son dudosos (<55%) → ¡No apuestes!
+            """)
+            
+            # MEJORES APUESTAS ML
+            st.markdown("---")
+            st.header("💎 MEJORES APUESTAS SEGÚN ML")
+            
+            todas_predicciones = []
+            
+            # 1X2
+            todas_predicciones.append({
+                'Mercado': 'Victoria Local',
+                'Probabilidad': prob_local,
+                'Cuota_Justa': 1/prob_local,
+                'Confianza': '⭐⭐⭐' if prob_local > 0.65 else '⭐⭐' if prob_local > 0.55 else '⭐'
+            })
+            todas_predicciones.append({
+                'Mercado': 'Empate',
+                'Probabilidad': prob_empate,
+                'Cuota_Justa': 1/prob_empate,
+                'Confianza': '⭐⭐⭐' if prob_empate > 0.65 else '⭐⭐' if prob_empate > 0.55 else '⭐'
+            })
+            todas_predicciones.append({
+                'Mercado': 'Victoria Visitante',
+                'Probabilidad': prob_visitante,
+                'Cuota_Justa': 1/prob_visitante,
+                'Confianza': '⭐⭐⭐' if prob_visitante > 0.65 else '⭐⭐' if prob_visitante > 0.55 else '⭐'
+            })
+            
+            # Over/Under
+            todas_predicciones.append({
+                'Mercado': 'Over 2.5',
+                'Probabilidad': prob_over,
+                'Cuota_Justa': 1/prob_over,
+                'Confianza': '⭐⭐⭐' if prob_over > 0.65 else '⭐⭐' if prob_over > 0.55 else '⭐'
+            })
+            todas_predicciones.append({
+                'Mercado': 'Under 2.5',
+                'Probabilidad': prob_under,
+                'Cuota_Justa': 1/prob_under,
+                'Confianza': '⭐⭐⭐' if prob_under > 0.65 else '⭐⭐' if prob_under > 0.55 else '⭐'
+            })
+            
+            # BTTS
+            todas_predicciones.append({
+                'Mercado': 'BTTS Sí',
+                'Probabilidad': prob_btts_si,
+                'Cuota_Justa': 1/prob_btts_si,
+                'Confianza': '⭐⭐⭐' if prob_btts_si > 0.65 else '⭐⭐' if prob_btts_si > 0.55 else '⭐'
+            })
+            todas_predicciones.append({
+                'Mercado': 'BTTS No',
+                'Probabilidad': prob_btts_no,
+                'Cuota_Justa': 1/prob_btts_no,
+                'Confianza': '⭐⭐⭐' if prob_btts_no > 0.65 else '⭐⭐' if prob_btts_no > 0.55 else '⭐'
+            })
+            
+            # Ordenar por probabilidad
+            todas_predicciones.sort(key=lambda x: x['Probabilidad'], reverse=True)
+            
+            # Mostrar top 3
+            st.subheader("🏆 Top 3 Apuestas ML")
+            
+            for i, pred in enumerate(todas_predicciones[:3], 1):
+                with st.expander(f"#{i} - {pred['Mercado']} | {pred['Probabilidad']*100:.1f}% {pred['Confianza']}"):
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Probabilidad", f"{pred['Probabilidad']*100:.1f}%")
+                    col2.metric("Cuota Justa", f"{pred['Cuota_Justa']:.2f}")
+                    col3.metric("Cuota Mínima Esperada", f"{pred['Cuota_Justa']*0.95:.2f}")
+                    
+                    st.markdown("---")
+                    st.markdown("### ⚖️ VEREDICTO ML")
+                    
+                    if pred['Probabilidad'] > 0.70:
+                        st.success("🟢 **MUY RECOMENDADA** - El modelo tiene alta confianza en esta predicción")
+                    elif pred['Probabilidad'] > 0.60:
+                        st.info("🔵 **RECOMENDADA** - Buena probabilidad según el modelo")
+                    elif pred['Probabilidad'] > 0.55:
+                        st.warning("🟡 **CONSIDERAR** - Probabilidad moderada, analiza más factores")
+                    else:
+                        st.error("🔴 **NO RECOMENDADA** - Probabilidad insuficiente")
+                    
+                    st.caption(f"""
+                    **Cómo interpretar:**
+                    - Si encuentras cuota ≥ {pred['Cuota_Justa']*0.95:.2f} → **HAY VALOR**
+                    - El modelo entrenó con {st.session_state['metricas']['n_samples']} partidos
+                    - Precisión del modelo: {st.session_state['metricas']['accuracy_1x2']*100:.0f}%
+                    """)
+    
+    # INFO ADICIONAL
+    st.markdown("---")
+    st.header("📚 Cómo Mejorar el Modelo")
+    
+    with st.expander("🚀 Pasos para un Modelo Profesional"):
+        st.markdown("""
+        ### 1️⃣ **Conseguir Datos Reales**
+        ```python
+        # APIs profesionales:
+        - football-data.org (gratis, limitada)
+        - api-football.com (€€, muy completa)
+        - sofascore.com (scraping)
+        - transfermarkt (valores de jugadores)
+        ```
         
-        # DISCLAIMER
-        st.markdown("---")
-        st.warning("""
-        ⚠️ **ADVERTENCIA IMPORTANTE:**
+        ### 2️⃣ **Agregar Más Features**
+        - xG (goles esperados) - CRÍTICO
+        - Posesión promedio
+        - Tiros a puerta
+        - Corners
+        - Tarjetas
+        - Lesiones de jugadores clave
+        - Valor de mercado del equipo
+        - Días de descanso
+        - Importancia del partido
         
-        - Este sistema utiliza análisis estadístico y modelos matemáticos (Distribución de Poisson).
-        - Las probabilidades son estimaciones basadas en datos históricos y NO garantizan resultados.
-        - El Expected Value (EV) es una herramienta de análisis, no una certeza.
-        - Siempre apuesta de forma responsable y dentro de tus posibilidades.
-        - Las apuestas deportivas conllevan riesgo. Nunca apuestes dinero que no puedas permitirte perder.
+        ### 3️⃣ **Entrenar con MÁS Datos**
+        - Mínimo 2,000 partidos
+        - Ideal: 5,000-10,000 partidos
+        - Múltiples temporadas
+        - Múltiples ligas
         
-        📊 **Usa este sistema como una herramienta de apoyo para tus decisiones, no como única fuente.**
+        ### 4️⃣ **Probar Otros Algoritmos**
+        ```python
+        from xgboost import XGBClassifier
+        from lightgbm import LGBMClassifier
+        from sklearn.neural_network import MLPClassifier
+        
+        # XGBoost suele dar mejores resultados
+        modelo = XGBClassifier(
+            n_estimators=500,
+            max_depth=8,
+            learning_rate=0.05
+        )
+        ```
+        
+        ### 5️⃣ **Validación Temporal**
+        - NO usar split aleatorio
+        - Entrenar con temporadas pasadas
+        - Testear con temporada actual
+        - Esto simula predicción real
+        
+        ### 6️⃣ **Comparar con Cuotas Reales**
+        ```python
+        # Scraping de cuotas
+        import requests
+        from bs4 import BeautifulSoup
+        
+        # Comparar vs Bet365, Betfair, etc.
+        # Solo apostar si EV > 5%
+        ```
+        
+        ### 7️⃣ **Backtesting**
+        - Simular apuestas en partidos pasados
+        - Calcular ROI real
+        - Ajustar estrategia de bankroll
+        
+        ### 8️⃣ **Ensemble de Modelos**
+        ```python
+        # Combinar predicciones
+        pred_final = (
+            pred_rf * 0.3 +
+            pred_xgb * 0.4 +
+            pred_poisson * 0.3
+        )
+        ```
         """)
+    
+    with st.expander("💡 ¿Por Qué ML es Mejor que Poisson?"):
+        st.markdown("""
+        ### Poisson Solo Usa:
+        - Promedio de goles
+        - Ventaja de local (fija)
+        
+        ### Machine Learning Usa:
+        - ✅ 33+ variables simultáneas
+        - ✅ Aprende relaciones complejas
+        - ✅ Se adapta a diferentes ligas
+        - ✅ Detecta patrones ocultos
+        - ✅ Mejora con más datos
+        
+        ### Ejemplo Real:
+        **Situación:** Equipo grande (1° en tabla) visita equipo débil (18°)
+        
+        **Poisson dice:** Local 25%, Empate 25%, Visitante 50%
+        → Solo ve promedios de goles
+        
+        **ML dice:** Local 15%, Empate 20%, Visitante 65%
+        → Considera: posición, forma, stats de visitante, H2H, etc.
+        
+        **ML es MÁS PRECISO** porque entiende el contexto completo.
+        """)
+    
+    # DISCLAIMER
+    st.markdown("---")
+    st.warning("""
+    ⚠️ **ADVERTENCIA IMPORTANTE:**
+    
+    - Este es un **DEMO educativo** con datos sintéticos
+    - En producción necesitas: datos reales + API de cuotas + más features
+    - Machine Learning NO garantiza ganancias
+    - Incluso con 65% de precisión puedes perder dinero
+    - Siempre apuesta responsablemente
+    - Usa esto como herramienta de APOYO, no como única fuente
+    
+    📊 **Para ganar dinero necesitas:**
+    1. Modelo con 58%+ precisión consistente
+    2. Encontrar cuotas con +5% EV
+    3. Gestión estricta de bankroll
+    4. Disciplina absoluta
+    5. Miles de apuestas (ley de grandes números)
+    """)
 
 if __name__ == "__main__":
     main()
