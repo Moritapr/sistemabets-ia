@@ -808,8 +808,8 @@ class GeneradorArgumentos:
 # ============================================================================
 
 def main():
-    st.title("⚽ SISTEMABETS PROFESIONAL v8.0")
-    st.markdown("### Sistema Definitivo con Ajustes por Competición")
+    st.title("⚽ SISTEMABETS ")
+    st.markdown("### Sistema Definitivo para analisis de partidos con Ajustes por Competición usando IA, Modelos Matematicos y entrenando machine learning para un futuro")
     
     # Inicializar
     if 'db_manager' not in st.session_state:
@@ -835,7 +835,7 @@ def main():
         
         st.markdown("---")
         
-        with st.expander("💡 Mejoras v8.0"):
+        with st.expander("💡 ULTIMA ACTUALIZACION"):
             st.markdown("""
             ### ✅ Nuevo en esta versión:
             
@@ -854,10 +854,7 @@ def main():
                - Basados en datos reales
                - Veredicto final claro
             
-            4. **Corrección Benfica vs Madrid**
-               - Ahora Real Madrid sale favorito
-               - Ajusta por nivel de liga
-               - Considera experiencia europea
+           
             """)
     
     # Selección de liga
@@ -1172,9 +1169,9 @@ def main():
     - Sistema con ajustes por nivel de competición y liga
     - Datos 100% reales de Football-Data.org
     - Detecta Champions/Europa League y ajusta predicciones
-    - NO garantiza ganancias, úsalo como herramienta de apoyo
-    - Siempre compara cuotas en múltiples casas
-    - Apuesta responsablemente
+    - NO garantiza ganancias, USARLO como herramienta de apoyo
+    - Siempre intente comparar usted mismo las cuotas en múltiples casas
+    - Apostar de manera coherente
     
     📊 **Mejores casos de uso:**
     - Partidos de la misma liga ✅
@@ -1185,3 +1182,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
