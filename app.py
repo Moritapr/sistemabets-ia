@@ -10,8 +10,33 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
-st.set_page_config(page_title="SISTEMABETS EXPERTO v9.0", layout="wide")
+# 1. Configuración base (ESTO YA LO TIENES)
+st.set_page_config(
+    page_title="SISTEMABETS CON AYUDA DE IA", 
+    page_icon="🤖", 
+    layout="wide"
+)
 
+# 2. INYECCIÓN DE METADATOS PARA PWA (AÑADE ESTO AQUÍ)
+st.markdown("""
+    <head>
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="Sistemabets">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        
+        <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/tu-usuario/tu-repo/main/logo.png">
+        <link rel="manifest" href="manifest.json">
+    </head>
+    
+    <style>
+        /* Limpieza de interfaz para que parezca nativa */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .block-container {padding-top: 1rem; padding-bottom: 0rem;}
+    </style>
+    """, unsafe_allow_html=True)
 # ============================================================================
 # BASE DE DATOS
 # ============================================================================
@@ -988,3 +1013,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
