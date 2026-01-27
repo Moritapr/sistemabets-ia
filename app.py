@@ -1073,6 +1073,29 @@ def main():
             col2.metric("Empate (ML)", f"{prediccion_ml['Empate']*100:.1f}%")
             col3.metric(f"{equipo_visitante} (ML)", f"{prediccion_ml['Visitante']*100:.1f}%")
             st.caption(f"📊 Precisión del modelo: {modelo_ml.precision*100:.1f}% | Basado en {db_manager.contar_partidos()} partidos")
+            with st.expander("ℹ️ ¿Qué es la predicción Machine Learning?"):
+                st.markdown("""
+                **🤖 Predicción Machine Learning (ML)**
+                
+                Este modelo aprende de los partidos históricos recolectados en la base de datos.
+                
+                **¿Cómo funciona?**
+                - Analiza patrones de 6 variables: forma de ambos equipos, goles a favor y en contra
+                - Usa un algoritmo llamado Random Forest que crea múltiples "árboles de decisión"
+                - Cada árbol vota y el resultado final es el promedio de todos
+                
+                **¿Qué significa la precisión?**
+                - 33% = adivinar al azar (3 resultados posibles)
+                - 40-50% = modelo básico útil
+                - 50-60% = modelo bueno
+                - 60%+ = modelo excelente
+                
+                **¿Por qué difiere de Poisson?**
+                - Poisson: modelo matemático basado en promedios de goles
+                - ML: aprende patrones ocultos de partidos reales
+                
+                Ambos son complementarios. Cuando coinciden, hay mayor confianza.
+                """)
 
   
         
@@ -1187,6 +1210,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
