@@ -506,21 +506,53 @@ class AnalizadorExperto:
         lambda_local *= 1.15
         lambda_visitante /= 1.08
         
-        if forma_local > 0.75:
-            lambda_local *= 1.25
+           if forma_local > 0.75:
+            lambda_local *= 1.12
+        elif forma_local > 0.60:
+            lambda_local *= 1.05
         elif forma_local < 0.35:
-            lambda_local *= 0.82
+            lambda_local *= 0.85
+        elif forma_local < 0.45:
+            lambda_local *= 0.92
         
         if forma_visitante > 0.75:
-            lambda_visitante *= 1.25
+            lambda_visitante *= 1.12
+        elif forma_visitante > 0.60:
+            lambda_visitante *= 1.05
         elif forma_visitante < 0.35:
-            lambda_visitante *= 0.82
+            lambda_visitante *= 0.85
+        elif forma_visitante < 0.45:
+            lambda_visitante *= 0.92
         
         lambda_local *= factor_local
         lambda_visitante *= factor_visitante
-        
-        lambda_local = max(min(lambda_local, 4.5), 0.30)
-        lambda_visitante = max(min(lambda_visitante, 4.5), 0.30)
+
+   # Ajuste por H2H histórico
+        if h2h and len(h2h) >= 3:
+            goles_local_h2h = 0
+            goles_visitante_h2h = 0
+            partidos_h2h = 0
+            
+            for p in h2h[:10]:  # Últimos 10 H2H
+                if p['local'] == local_team['Equipo']:
+                    goles_local_h2h += p['goles_local']
+                    goles_visitante_h2h += p['goles_visitante']
+                else:
+                    goles_local_h2h += p['goles_visitante']
+                    goles_visitante_h2h += p['goles_local']
+                partidos_h2h += 1
+            
+            if partidos_h2h > 0:
+                promedio_local_h2h = goles_local_h2h / partidos_h2h
+                promedio_visitante_h2h = goles_visitante_h2h / partidos_h2h
+                
+                # Ajustar lambda basado en H2H (peso 15%)
+                lambda_local = lambda_local * 0.85 + promedio_local_h2h * 0.15
+                lambda_visitante = lambda_visitante * 0.85 + promedio_visitante_h2h * 0.15
+     
+
+        lambda_local = max(min(lambda_local, 3.5), 0.35)
+        lambda_visitante = max(min(lambda_visitante, 3.0), 0.25)
         
         return {
             'lambda_local': lambda_local,
@@ -1035,6 +1067,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
