@@ -13,20 +13,23 @@ warnings.filterwarnings('ignore')
 # 1. Configuración base
 st.set_page_config(
     page_title="SISTEMABETS CON AYUDA DE IA", 
-    page_icon="🤖", 
+    page_icon=URL_LOGO_MEDIEVAL, # Esto quita el robot y pone tu corona
     layout="wide"
 )
 
-URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png?v=1"
+# --- IDENTIDAD VISUAL FORZADA PARA IOS ---
+URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
 
-pwa_html = f'''
+st.markdown(f'''
     <head>
-        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=2">
+        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=2">
+        
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        <meta name="apple-mobile-web-app-title" content="Sistemabets">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black">
     </head>
-'''
-st.markdown(pwa_html, unsafe_allow_html=True)
+''', unsafe_allow_html=True)
 # ============================================================================
 # BASE DE DATOS
 # ============================================================================
@@ -1004,6 +1007,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
