@@ -561,7 +561,7 @@ class AnalizadorExperto:
             advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite visitante")
         elif local_es_elite and visitante_es_elite:
             factor_local *= 1.05
-            factor_visitante *= 1.25
+            factor_visitante *= 1.35
             advertencias.append("⚔️ Duelo de élites - ambos potenciados")
         
         return factor_local, factor_visitante, advertencias
@@ -1212,6 +1212,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
