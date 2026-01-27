@@ -208,8 +208,8 @@ class FootballDataAPI:
         except:
             return []
     
-    def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
-    try:
+       def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
+        try:
         h2h_combinado = []
         partidos_vistos = set()
         
@@ -740,8 +740,8 @@ def main():
         with st.spinner("Cargando datos..."):
             partidos_local = api.obtener_ultimos_20_partidos(equipo_local)
             partidos_visitante = api.obtener_ultimos_20_partidos(equipo_visitante)
-            h2h = api.obtener_enfrentamientos_directos_completo(equipo_local, equipo_visitante)
-             time.sleep(1)  # Respetar rate limit de la API
+           h2h = api.obtener_enfrentamientos_directos_completo(equipo_local, equipo_visitante)
+            time.sleep(1)  # Respetar rate limit de la API
         
         if not partidos_local or not partidos_visitante:
             st.error("❌ No se pudieron cargar partidos")
@@ -988,4 +988,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
