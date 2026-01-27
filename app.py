@@ -226,7 +226,7 @@ class FootballDataAPI:
             return []
     
    
-      def buscar_team_id(self, equipo_nombre):
+     def buscar_team_id(self, equipo_nombre):
         """Busca el ID de un equipo si no está en cache"""
         # Primero revisar cache
         if equipo_nombre in self.cache_teams:
@@ -244,7 +244,6 @@ class FootballDataAPI:
             data = response.json()
             for team in data.get('teams', []):
                 self.cache_teams[team['name']] = team['id']
-                # Buscar coincidencia parcial también
                 if equipo_nombre.lower() in team['name'].lower() or team['name'].lower() in equipo_nombre.lower():
                     return team['id']
             
@@ -252,14 +251,11 @@ class FootballDataAPI:
         except:
             return None
     
-    
-    
     def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
         try:
             h2h_combinado = []
             partidos_vistos = set()
             
-            # Buscar desde ambos equipos para capturar todo el historial
             for equipo_buscar, equipo_rival in [(equipo1, equipo2), (equipo2, equipo1)]:
                 team_id = self.buscar_team_id(equipo_buscar)
                 if not team_id:
@@ -281,11 +277,9 @@ class FootballDataAPI:
                     home = match['homeTeam']['name']
                     away = match['awayTeam']['name']
                     
-                    # Verificar que sea enfrentamiento directo
                     if not ((home == equipo1 and away == equipo2) or (home == equipo2 and away == equipo1)):
                         continue
                     
-                    # Crear ID único para evitar duplicados
                     match_id = f"{match['utcDate'][:10]}_{home}_{away}"
                     
                     if match_id in partidos_vistos:
@@ -293,7 +287,7 @@ class FootballDataAPI:
                     
                     partidos_vistos.add(match_id)
                     
-                   h2h_combinado.append({
+                    h2h_combinado.append({
                         'local': home,
                         'visitante': away,
                         'goles_local': match['score']['fullTime']['home'],
@@ -301,11 +295,10 @@ class FootballDataAPI:
                         'fecha': match['utcDate'],
                         'competicion': match['competition']['name']
                     })
-                time.sleep(6)  # ← 16 espacios, al nivel del "for match"
+                time.sleep(6)
             return sorted(h2h_combinado, key=lambda x: x['fecha'], reverse=True)
         except Exception as e:
             return []
-
 
 # ============================================================================
 # RECOLECTOR AUTOMÁTICO
@@ -1067,6 +1060,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
