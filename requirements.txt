@@ -4,3 +4,4 @@ numpy
 requests
 scipy
 scikit-learn
+joblib
