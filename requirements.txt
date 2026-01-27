@@ -5,3 +5,4 @@ requests
 scipy
 scikit-learn
 joblib
+beautifulsoup4
