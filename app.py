@@ -678,8 +678,8 @@ class AnalizadorExperto:
             factor_local *= 0.90
             advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite visitante")
         elif local_es_elite and visitante_es_elite:
-            factor_local *= 1.05
-            factor_visitante *= 1.15
+            factor_local *= 1.00
+            factor_visitante *= 1.10
             advertencias.append("⚔️ Duelo de élites - ambos potenciados")
         
         return factor_local, factor_visitante, advertencias
@@ -715,8 +715,8 @@ class AnalizadorExperto:
         lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
         lambda_visitante = (gf_visitante_fuera / max(media_goles, 0.5)) * (gc_local_casa / max(media_goles, 0.5)) * media_goles
         
-        lambda_local *= 1.25
-        lambda_visitante *= 1.05
+        lambda_local *= 1.15
+        lambda_visitante *= 1.00
         
         if forma_local > 0.75:
             lambda_local *= 1.12
@@ -1050,12 +1050,7 @@ def main():
             if exito:
                 st.success(f"🤖 {mensaje}")
 
-        # Analizar noticias si las hay
-        analisis_noticias = None
-        if 'noticias_input' in dir() and noticias_input:
-            analisis_noticias = AnalizadorNoticias.generar_resumen_noticias(
-                equipo_local, equipo_visitante, noticias_input
-            )
+        
 
         analisis = AnalizadorExperto.analisis_completo(
             local_team, visitante_team, partidos_local, partidos_visitante, h2h
@@ -1369,6 +1364,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
