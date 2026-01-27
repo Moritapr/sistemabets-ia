@@ -220,13 +220,11 @@ class FootballDataAPI:
                     'fecha': match['utcDate'],
                     'competicion': match['competition']['name']
                 })
-            
             return sorted(partidos, key=lambda x: x['fecha'], reverse=True)
         except:
             return []
     
-   
-     def buscar_team_id(self, equipo_nombre):
+    def buscar_team_id(self, equipo_nombre):
         """Busca el ID de un equipo si no está en cache"""
         # Primero revisar cache
         if equipo_nombre in self.cache_teams:
@@ -1058,6 +1056,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
