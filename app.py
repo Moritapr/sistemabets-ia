@@ -11,19 +11,22 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 1. PRIMERO DEFINIMOS LA VARIABLE
-URL_FINAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/icono_pwa.png"
+URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
 
 # 2. LUEGO LA USAMOS EN LA CONFIGURACIÓN
 st.set_page_config(
     page_title="SISTEMABETS CON AYUDA DE IA", 
-    page_icon=URL_FINAL, 
+    page_icon=URL_LOGO_MEDIEVAL, 
     layout="wide"
 )
 
+# 3. INYECCIÓN DE METADATOS PARA IPHONE
 st.markdown(f'''
     <head>
-        <link rel="apple-touch-icon" href="{URL_FINAL}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=3">
+        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=3">
         <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     </head>
 ''', unsafe_allow_html=True)
 # ============================================================================
