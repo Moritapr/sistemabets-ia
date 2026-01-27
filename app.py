@@ -20,12 +20,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# 3. INYECCIÓN DE METADATOS PARA IPHONE
 st.markdown(f'''
     <head>
-        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=4">
-        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=4">
+        <meta name="apple-mobile-web-app-title" content="Sistemabets">
         <meta name="apple-mobile-web-app-capable" content="yes">
+        
+        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=10">
+        <link rel="apple-touch-icon" sizes="152x152" href="{URL_LOGO_MEDIEVAL}?v=10">
+        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=10">
+        <link rel="apple-touch-icon" sizes="167x167" href="{URL_LOGO_MEDIEVAL}?v=10">
     </head>
 ''', unsafe_allow_html=True)
 # ============================================================================
@@ -1005,6 +1008,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
