@@ -655,8 +655,9 @@ Cuota mínima: {(1/prob)*0.95:.2f}"""
 # ============================================================================
 
 def main():
-    st.title("⚽ SISTEMABETS EXPERTO v9.0")
-    st.markdown("### Sistema Profesional Completo")
+    st.title("⚽ SISTEMABETS CON AYUDA DE IA Y FUNCIONES MATEMATICAS")
+    st.markdown("### Sistema enfocado en la ayuda con los analisis deportivos")
+    st.markdown("Hecho por Alejandro Mora")
     
     if 'db_manager' not in st.session_state:
         st.session_state['db_manager'] = DatabaseManager()
@@ -1007,5 +1008,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
