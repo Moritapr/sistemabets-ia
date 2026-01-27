@@ -137,12 +137,12 @@ class FootballDataAPI:
     }
     
     ELITE_TEAMS = {
-        'Real Madrid', 'FC Barcelona', 'Atlético Madrid',
-        'Manchester City', 'Liverpool FC', 'Chelsea FC', 'Arsenal FC',
-        'Manchester United', 'Tottenham Hotspur',
-        'FC Bayern München', 'Borussia Dortmund', 'RB Leipzig',
-        'Inter Milan', 'AC Milan', 'Juventus FC', 'SSC Napoli',
-        'Paris Saint-Germain', 'AFC Ajax', 'SL Benfica', 'FC Porto'
+        'Real Madrid', 'Real Madrid CF', 'FC Barcelona', 'Atlético Madrid', 'Atlético de Madrid', 'Club Atlético de Madrid',
+        'Manchester City', 'Manchester City FC', 'Liverpool FC', 'Chelsea FC', 'Arsenal FC',
+        'Manchester United', 'Manchester United FC', 'Tottenham Hotspur', 'Tottenham Hotspur FC',
+        'FC Bayern München', 'Bayern Munich', 'Borussia Dortmund', 'RB Leipzig',
+        'Inter Milan', 'FC Internazionale Milano', 'AC Milan', 'Juventus FC', 'SSC Napoli',
+        'Paris Saint-Germain', 'Paris Saint-Germain FC', 'AFC Ajax', 'SL Benfica', 'FC Porto'
     }
     
     def __init__(self, api_key):
@@ -445,21 +445,23 @@ class AnalizadorExperto:
         factor_visitante = 1.0
         advertencias = []
         
-        # Detectar Champions
-        competiciones = [p['competicion'] for p in (partidos_local + partidos_visitante)[:10]]
-        es_europea = any('Champions' in c or 'Europa' in c or 'UEFA' in c for c in competiciones)
+        # Detectar si AMBOS equipos son de élite (no aplica ajuste)
+        local_es_elite = local_team['Equipo'] in FootballDataAPI.ELITE_TEAMS
+        visitante_es_elite = visitante_team['Equipo'] in FootballDataAPI.ELITE_TEAMS
         
-        if es_europea:
-            advertencias.append("🏆 Competición europea detectada")
-            
-            if local_team['Equipo'] in FootballDataAPI.ELITE_TEAMS and visitante_team['Equipo'] not in FootballDataAPI.ELITE_TEAMS:
-                factor_local *= 1.15
-                factor_visitante *= 0.88
-                advertencias.append(f"🌟 {local_team['Equipo']} es equipo de élite")
-            elif visitante_team['Equipo'] in FootballDataAPI.ELITE_TEAMS and local_team['Equipo'] not in FootballDataAPI.ELITE_TEAMS:
-                factor_visitante *= 1.15
-                factor_local *= 0.88
-                advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite")
+        # Solo aplicar ajuste si UNO es élite y el otro NO
+        es_europea = False  # Ya no usamos esta detección automática
+        
+        if local_es_elite and not visitante_es_elite:
+            factor_local *= 1.10
+            factor_visitante *= 0.92
+            advertencias.append(f"🌟 {local_team['Equipo']} es equipo de élite")
+        elif visitante_es_elite and not local_es_elite:
+            factor_visitante *= 1.10
+            factor_local *= 0.92
+            advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite")
+        elif local_es_elite and visitante_es_elite:
+            advertencias.append("⚔️ Duelo de élites - sin ajuste")
         
         return factor_local, factor_visitante, advertencias
     
@@ -1056,6 +1058,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
