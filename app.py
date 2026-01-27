@@ -10,22 +10,26 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
-# 1. Configuración base (ESTO YA LO TIENES)
+# 1. Configuración base
 st.set_page_config(
     page_title="SISTEMABETS CON AYUDA DE IA", 
     page_icon="🤖", 
     layout="wide"
 )
 
-# --- INYECCIÓN DE IDENTIDAD PWA ---
-st.markdown(f"""
-    
+# 2. INYECCIÓN DE IDENTIDAD PWA (Solo metadatos, sin Style)
+URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
+
+# Usamos triple comilla simple para evitar conflictos con comillas dobles del HTML
+pwa_html = f'''
     <head>
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <link rel="apple-touch-icon" href="https://tu-repo.com/logo_personalizado.png">
+        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}">
     </head>
-    """, unsafe_allow_html=True)
+'''
+
+st.markdown(pwa_html, unsafe_allow_html=True)
 # ============================================================================
 # BASE DE DATOS
 # ============================================================================
@@ -1003,6 +1007,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
