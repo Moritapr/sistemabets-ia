@@ -552,15 +552,17 @@ class AnalizadorExperto:
         es_europea = False  # Ya no usamos esta detección automática
         
         if local_es_elite and not visitante_es_elite:
-            factor_local *= 1.10
-            factor_visitante *= 0.92
+            factor_local *= 1.15
+            factor_visitante *= 0.88
             advertencias.append(f"🌟 {local_team['Equipo']} es equipo de élite")
         elif visitante_es_elite and not local_es_elite:
-            factor_visitante *= 1.10
-            factor_local *= 0.92
-            advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite")
+            factor_visitante *= 1.25
+            factor_local *= 0.90
+            advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite visitante")
         elif local_es_elite and visitante_es_elite:
-            advertencias.append("⚔️ Duelo de élites - sin ajuste")
+            factor_local *= 1.05
+            factor_visitante *= 1.05
+            advertencias.append("⚔️ Duelo de élites - ambos potenciados")
         
         return factor_local, factor_visitante, advertencias
     
@@ -1210,6 +1212,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
