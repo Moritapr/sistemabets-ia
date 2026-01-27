@@ -208,33 +208,21 @@ class FootballDataAPI:
         except:
             return []
     
-   def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
+    def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
         try:
             team_id = self.cache_teams.get(equipo1)
             if not team_id:
-                print(f"❌ No se encontró team_id para {equipo1}")
                 return []
             
-            # Obtener partidos de últimos 5 años
-            from datetime import timedelta
-            fecha_desde = (datetime.now() - timedelta(days=1825)).strftime('%Y-%m-%d')
-            
             url = f"{self.BASE_URL}/teams/{team_id}/matches"
-            params = {
-                "status": "FINISHED",
-                "limit": 100,
-                "dateFrom": fecha_desde
-            }
+            params = {"status": "FINISHED", "limit": 100}
             response = requests.get(url, headers=self.headers, params=params, timeout=15)
             
             if response.status_code != 200:
-                print(f"❌ API Error: {response.status_code}")
                 return []
             
             data = response.json()
             h2h = []
-            
-            print(f"🔍 Analizando {len(data.get('matches', []))} partidos de {equipo1}")
             
             for match in data.get('matches', []):
                 if match['score']['fullTime']['home'] is None:
@@ -253,16 +241,9 @@ class FootballDataAPI:
                         'competicion': match['competition']['name']
                     })
             
-            print(f"✅ H2H encontrados: {len(h2h)}")
-            if h2h:
-                print(f"   Más reciente: {h2h[0]['local']} vs {h2h[0]['visitante']} ({h2h[0]['fecha'][:10]})")
-            
             return sorted(h2h, key=lambda x: x['fecha'], reverse=True)
-        except Exception as e:
-            print(f"❌ Error en H2H: {str(e)}")
+        except:
             return []
-
-
 
 # ============================================================================
 # RECOLECTOR AUTOMÁTICO
@@ -990,5 +971,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
