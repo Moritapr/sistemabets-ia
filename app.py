@@ -361,7 +361,125 @@ class RecolectorAutomatico:
         status_text.empty()
         
         return partidos_nuevos, partidos_duplicados, errores
+# ============================================================================
+# ANALIZADOR DE NOTICIAS
+# ============================================================================
 
+from bs4 import BeautifulSoup
+import urllib.parse
+
+class AnalizadorNoticias:
+    KEYWORDS_NEGATIVAS = {
+        'lesionado': -0.15, 'lesión': -0.15, 'injury': -0.15, 'injured': -0.15,
+        'baja': -0.12, 'out': -0.10, 'doubt': -0.08, 'duda': -0.08,
+        'suspendido': -0.12, 'suspended': -0.12, 'sancionado': -0.12,
+        'expulsado': -0.10, 'roja': -0.08, 'red card': -0.08,
+    }
+    
+    KEYWORDS_POSITIVAS = {
+        'recuperado': 0.10, 'recovered': 0.10, 'vuelve': 0.08, 'returns': 0.08,
+        'racha': 0.05, 'streak': 0.05, 'forma': 0.05, 'form': 0.05,
+        'fichaje': 0.03, 'signing': 0.03, 'refuerzo': 0.05,
+        'goleador': 0.05, 'scorer': 0.05,
+    }
+    
+    @staticmethod
+    def buscar_noticias_google(equipo_nombre):
+        """Busca noticias en Google News RSS"""
+        try:
+            # Limpiar nombre del equipo
+            equipo_buscar = equipo_nombre.replace('FC', '').replace('CF', '').strip()
+            query = urllib.parse.quote(f"{equipo_buscar} fútbol")
+            url = f"https://news.google.com/rss/search?q={query}&hl=es-419&gl=ES&ceid=ES:es"
+            
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                return []
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            items = soup.find_all('item')[:5]  # Solo las 5 más recientes
+            
+            noticias = []
+            for item in items:
+                titulo = item.find('title').text if item.find('title') else ''
+                fecha = item.find('pubdate').text if item.find('pubdate') else ''
+                link = item.find('link').text if item.find('link') else ''
+                
+                noticias.append({
+                    'titulo': titulo,
+                    'fecha': fecha[:16] if fecha else '',
+                    'link': link
+                })
+            
+            return noticias
+        except Exception as e:
+            return []
+    
+    @staticmethod
+    def analizar_noticias(noticias, equipo_nombre):
+        """Analiza las noticias y detecta keywords"""
+        ajuste = 0
+        alertas = []
+        
+        for noticia in noticias:
+            texto = noticia['titulo'].lower()
+            
+            # Buscar keywords negativas
+            for keyword, impacto in AnalizadorNoticias.KEYWORDS_NEGATIVAS.items():
+                if keyword in texto:
+                    ajuste += impacto
+                    alertas.append({
+                        'tipo': 'negativa',
+                        'keyword': keyword,
+                        'impacto': impacto,
+                        'titulo': noticia['titulo']
+                    })
+                    break  # Solo una alerta por noticia
+            
+            # Buscar keywords positivas
+            for keyword, impacto in AnalizadorNoticias.KEYWORDS_POSITIVAS.items():
+                if keyword in texto:
+                    ajuste += impacto
+                    alertas.append({
+                        'tipo': 'positiva',
+                        'keyword': keyword,
+                        'impacto': impacto,
+                        'titulo': noticia['titulo']
+                    })
+                    break
+        
+        return {
+            'ajuste': max(min(ajuste, 0.20), -0.20),
+            'alertas': alertas,
+            'noticias': noticias
+        }
+    
+    @staticmethod
+    def obtener_analisis_completo(equipo_local, equipo_visitante):
+        """Busca y analiza noticias de ambos equipos"""
+        noticias_local = AnalizadorNoticias.buscar_noticias_google(equipo_local)
+        time.sleep(1)  # Evitar rate limit
+        noticias_visitante = AnalizadorNoticias.buscar_noticias_google(equipo_visitante)
+        
+        return {
+            'local': AnalizadorNoticias.analizar_noticias(noticias_local, equipo_local),
+            'visitante': AnalizadorNoticias.analizar_noticias(noticias_visitante, equipo_visitante)
+        }
+    
+    @staticmethod
+    def generar_resumen_noticias(equipo_local, equipo_visitante, noticias_texto=""):
+        resultado = {
+            'local': {'ajuste': 0, 'alertas': [], 'contexto': []},
+            'visitante': {'ajuste': 0, 'alertas': [], 'contexto': []},
+        }
+        
+        if not noticias_texto:
+            return resultado
+        
+        resultado['local'] = AnalizadorNoticias.analizar_texto(noticias_texto, equipo_local)
+        resultado['visitante'] = AnalizadorNoticias.analizar_texto(noticias_texto, equipo_visitante)
+        
+        return resultado
 # ============================================================================
 # MACHINE LEARNING
 # ============================================================================
@@ -898,6 +1016,8 @@ def main():
     with col2:
         equipos_visitante = [e for e in df_liga['Equipo'].tolist() if e != equipo_local]
         equipo_visitante = st.selectbox("✈️ Visitante", equipos_visitante)
+
+ 
     
     # ANÁLISIS
     if st.button("🚀 ANALIZAR", type="primary", use_container_width=True):
@@ -908,11 +1028,14 @@ def main():
         st.markdown("---")
         st.header(f"📊 {equipo_local} vs {equipo_visitante}")
         
-        with st.spinner("Cargando datos..."):
+        with st.spinner("Cargando datos y noticias..."):
             partidos_local = api.obtener_ultimos_20_partidos(equipo_local)
             partidos_visitante = api.obtener_ultimos_20_partidos(equipo_visitante)
             h2h = api.obtener_enfrentamientos_directos_completo(equipo_local, equipo_visitante)
             time.sleep(1)
+            
+            # Buscar noticias automáticamente
+            analisis_noticias = AnalizadorNoticias.obtener_analisis_completo(equipo_local, equipo_visitante)
         
         if not partidos_local or not partidos_visitante:
             st.error("❌ No se pudieron cargar partidos")
@@ -927,14 +1050,48 @@ def main():
             if exito:
                 st.success(f"🤖 {mensaje}")
 
+        # Analizar noticias si las hay
+        analisis_noticias = None
+        if 'noticias_input' in dir() and noticias_input:
+            analisis_noticias = AnalizadorNoticias.generar_resumen_noticias(
+                equipo_local, equipo_visitante, noticias_input
+            )
+
         analisis = AnalizadorExperto.analisis_completo(
             local_team, visitante_team, partidos_local, partidos_visitante, h2h
         )
         
         # Advertencias
-        if analisis.get('advertencias'):
-            for adv in analisis['advertencias']:
-                st.warning(adv)
+        # Mostrar noticias encontradas
+        if analisis_noticias:
+            st.markdown("---")
+            st.subheader("📰 Noticias Recientes (Auto)")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"**{equipo_local}**")
+                if analisis_noticias['local']['noticias']:
+                    for noticia in analisis_noticias['local']['noticias'][:3]:
+                        st.caption(f"• {noticia['titulo'][:80]}...")
+                    if analisis_noticias['local']['alertas']:
+                        for alerta in analisis_noticias['local']['alertas']:
+                            emoji = "❌" if alerta['tipo'] == 'negativa' else "✅"
+                            st.warning(f"{emoji} {alerta['keyword'].upper()}: {alerta['impacto']*100:+.0f}%")
+                else:
+                    st.caption("No se encontraron noticias")
+            
+            with col2:
+                st.markdown(f"**{equipo_visitante}**")
+                if analisis_noticias['visitante']['noticias']:
+                    for noticia in analisis_noticias['visitante']['noticias'][:3]:
+                        st.caption(f"• {noticia['titulo'][:80]}...")
+                    if analisis_noticias['visitante']['alertas']:
+                        for alerta in analisis_noticias['visitante']['alertas']:
+                            emoji = "❌" if alerta['tipo'] == 'negativa' else "✅"
+                            st.warning(f"{emoji} {alerta['keyword'].upper()}: {alerta['impacto']*100:+.0f}%")
+                else:
+                    st.caption("No se encontraron noticias")
         
         # Parámetros
         st.subheader("🔍 Parámetros")
@@ -1212,6 +1369,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
