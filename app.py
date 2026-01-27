@@ -595,8 +595,8 @@ class AnalizadorExperto:
         lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
         lambda_visitante = (gf_visitante_fuera / max(media_goles, 0.5)) * (gc_local_casa / max(media_goles, 0.5)) * media_goles
         
-        lambda_local *= 1.15
-        lambda_visitante /= 1.08
+        lambda_local *= 1.10
+        lambda_visitante *= 0.97
         
         if forma_local > 0.75:
             lambda_local *= 1.12
@@ -641,8 +641,8 @@ class AnalizadorExperto:
                 lambda_local = lambda_local * 0.85 + promedio_local_h2h * 0.15
                 lambda_visitante = lambda_visitante * 0.85 + promedio_visitante_h2h * 0.15
         
-        lambda_local = max(min(lambda_local, 3.5), 0.35)
-        lambda_visitante = max(min(lambda_visitante, 3.0), 0.25)
+        lambda_local = max(min(lambda_local, 3.5), 0.50)
+        lambda_visitante = max(min(lambda_visitante, 3.0), 0.40)
         
         return {
             'lambda_local': lambda_local,
@@ -1210,6 +1210,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
