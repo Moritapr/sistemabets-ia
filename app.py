@@ -1,4 +1,12 @@
-mercados['1X2'] = {
+mercados = {}
+        
+        # 1. RESULTADO FINAL (1X2)
+        p_local = np.sum(np.tril(matriz, -1))
+        p_empate = np.sum(np.diag(matriz))
+        p_visitante = np.sum(np.triu(matriz, 1))
+        total = p_local + p_empate + p_visitante
+        
+        mercados['1X2'] = {
             'Local': max(p_local / total, 0.005),
             'Empate': max(p_empate / total, 0.005),
             'Visitante': max(p_visitante / total, 0.005)
