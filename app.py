@@ -17,19 +17,19 @@ st.set_page_config(
     layout="wide"
 )
 
-# 2. INYECCIÓN DE METADATOS PARA PWA (AÑADE ESTO AQUÍ)
-st.markdown("""
+# --- INYECCIÓN DE IDENTIDAD PWA ---
+st.markdown(f"""
+    <style>
+        /* Solo ocultamos el header de Streamlit para ganar espacio, manteniendo tu login intacto */
+        header {{visibility: hidden;}}
+        .block-container {{padding-top: 2rem;}}
+    </style>
+    
     <head>
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="Sistemabets">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        
-        <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/tu-usuario/tu-repo/main/logo.png">
-        <link rel="manifest" href="manifest.json">
+        <link rel="apple-touch-icon" href="https://tu-repo.com/logo_personalizado.png">
     </head>
-    
- 
     """, unsafe_allow_html=True)
 # ============================================================================
 # BASE DE DATOS
@@ -1008,6 +1008,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
