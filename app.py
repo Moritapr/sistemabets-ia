@@ -10,24 +10,23 @@ import time
 import warnings
 warnings.filterwarnings('ignore')
 
-# 1. Configuración base
+# 1. PRIMERO DEFINIMOS LA VARIABLE
+URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
+
+# 2. LUEGO LA USAMOS EN LA CONFIGURACIÓN
 st.set_page_config(
     page_title="SISTEMABETS CON AYUDA DE IA", 
-    page_icon=URL_LOGO_MEDIEVAL, # Esto quita el robot y pone tu corona
+    page_icon=URL_LOGO_MEDIEVAL, 
     layout="wide"
 )
 
-# --- IDENTIDAD VISUAL FORZADA PARA IOS ---
-URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
-
+# 3. INYECCIÓN DE METADATOS PARA IPHONE
 st.markdown(f'''
     <head>
-        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=2">
-        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=2">
-        
+        <link rel="apple-touch-icon" sizes="180x180" href="{URL_LOGO_MEDIEVAL}?v=3">
+        <link rel="apple-touch-icon" href="{URL_LOGO_MEDIEVAL}?v=3">
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-title" content="Sistemabets">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     </head>
 ''', unsafe_allow_html=True)
 # ============================================================================
@@ -1007,6 +1006,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
