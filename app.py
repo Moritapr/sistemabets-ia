@@ -208,57 +208,57 @@ class FootballDataAPI:
         except:
             return []
     
-       def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
+    def obtener_enfrentamientos_directos_completo(self, equipo1, equipo2):
         try:
-        h2h_combinado = []
-        partidos_vistos = set()
-        
-        # Buscar desde ambos equipos para capturar todo el historial
-        for equipo_buscar, equipo_rival in [(equipo1, equipo2), (equipo2, equipo1)]:
-            team_id = self.cache_teams.get(equipo_buscar)
-            if not team_id:
-                continue
+            h2h_combinado = []
+            partidos_vistos = set()
             
-            url = f"{self.BASE_URL}/teams/{team_id}/matches"
-            params = {"status": "FINISHED", "limit": 200}  # Aumentado a 200
-            response = requests.get(url, headers=self.headers, params=params, timeout=15)
-            
-            if response.status_code != 200:
-                continue
-            
-            data = response.json()
-            
-            for match in data.get('matches', []):
-                if match['score']['fullTime']['home'] is None:
+            # Buscar desde ambos equipos para capturar todo el historial
+            for equipo_buscar, equipo_rival in [(equipo1, equipo2), (equipo2, equipo1)]:
+                team_id = self.cache_teams.get(equipo_buscar)
+                if not team_id:
                     continue
                 
-                home = match['homeTeam']['name']
-                away = match['awayTeam']['name']
+                url = f"{self.BASE_URL}/teams/{team_id}/matches"
+                params = {"status": "FINISHED", "limit": 200}
+                response = requests.get(url, headers=self.headers, params=params, timeout=15)
                 
-                # Verificar que sea enfrentamiento directo
-                if not ((home == equipo1 and away == equipo2) or (home == equipo2 and away == equipo1)):
+                if response.status_code != 200:
                     continue
                 
-                # Crear ID único para evitar duplicados
-                match_id = f"{match['utcDate'][:10]}_{home}_{away}"
+                data = response.json()
                 
-                if match_id in partidos_vistos:
-                    continue
-                
-                partidos_vistos.add(match_id)
-                
-                h2h_combinado.append({
-                    'local': home,
-                    'visitante': away,
-                    'goles_local': match['score']['fullTime']['home'],
-                    'goles_visitante': match['score']['fullTime']['away'],
-                    'fecha': match['utcDate'],
-                    'competicion': match['competition']['name']
-                })
-        
-        return sorted(h2h_combinado, key=lambda x: x['fecha'], reverse=True)
-    except Exception as e:
-        return []
+                for match in data.get('matches', []):
+                    if match['score']['fullTime']['home'] is None:
+                        continue
+                    
+                    home = match['homeTeam']['name']
+                    away = match['awayTeam']['name']
+                    
+                    # Verificar que sea enfrentamiento directo
+                    if not ((home == equipo1 and away == equipo2) or (home == equipo2 and away == equipo1)):
+                        continue
+                    
+                    # Crear ID único para evitar duplicados
+                    match_id = f"{match['utcDate'][:10]}_{home}_{away}"
+                    
+                    if match_id in partidos_vistos:
+                        continue
+                    
+                    partidos_vistos.add(match_id)
+                    
+                    h2h_combinado.append({
+                        'local': home,
+                        'visitante': away,
+                        'goles_local': match['score']['fullTime']['home'],
+                        'goles_visitante': match['score']['fullTime']['away'],
+                        'fecha': match['utcDate'],
+                        'competicion': match['competition']['name']
+                    })
+            
+            return sorted(h2h_combinado, key=lambda x: x['fecha'], reverse=True)
+        except Exception as e:
+            return []
 
 
 # ============================================================================
@@ -740,8 +740,8 @@ def main():
         with st.spinner("Cargando datos..."):
             partidos_local = api.obtener_ultimos_20_partidos(equipo_local)
             partidos_visitante = api.obtener_ultimos_20_partidos(equipo_visitante)
-           h2h = api.obtener_enfrentamientos_directos_completo(equipo_local, equipo_visitante)
-            time.sleep(1)  # Respetar rate limit de la API
+            h2h = api.obtener_enfrentamientos_directos_completo(equipo_local, equipo_visitante)
+            time.sleep(1)
         
         if not partidos_local or not partidos_visitante:
             st.error("❌ No se pudieron cargar partidos")
@@ -988,5 +988,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
