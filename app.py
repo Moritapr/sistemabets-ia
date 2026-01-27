@@ -491,7 +491,7 @@ class AnalizadorExperto:
         
         media_goles = (gf_local_tabla + gf_visitante_tabla) / 2
         
-   lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
+        lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
         lambda_visitante = (gf_visitante_fuera / max(media_goles, 0.5)) * (gc_local_casa / max(media_goles, 0.5)) * media_goles
         
         lambda_local *= 1.15
@@ -1056,6 +1056,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
