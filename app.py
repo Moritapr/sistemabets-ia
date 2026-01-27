@@ -595,8 +595,8 @@ class AnalizadorExperto:
         lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
         lambda_visitante = (gf_visitante_fuera / max(media_goles, 0.5)) * (gc_local_casa / max(media_goles, 0.5)) * media_goles
         
-        lambda_local *= 1.10
-        lambda_visitante *= 0.97
+        lambda_local *= 1.25
+        lambda_visitante *= 1.05
         
         if forma_local > 0.75:
             lambda_local *= 1.12
@@ -1210,6 +1210,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
