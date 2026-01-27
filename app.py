@@ -1,4 +1,4 @@
-import streamlit as st
+vimport streamlit as st
 import pandas as pd
 import numpy as np
 import requests
@@ -117,6 +117,14 @@ class DatabaseManager:
         cursor.execute('DELETE FROM partidos')
         conn.commit()
         conn.close()
+        
+    def obtener_todos_partidos(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM partidos ORDER BY fecha DESC')
+        partidos = cursor.fetchall()
+        conn.close()
+        return partidos    
 
 # ============================================================================
 # API FOOTBALL-DATA
@@ -353,6 +361,97 @@ class RecolectorAutomatico:
         status_text.empty()
         
         return partidos_nuevos, partidos_duplicados, errores
+
+# ============================================================================
+# MACHINE LEARNING
+# ============================================================================
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+import joblib
+
+class ModeloMLReal:
+    def __init__(self, db_manager):
+        self.db = db_manager
+        self.modelo_1x2 = None
+        self.modelo_goles = None
+        self.precision = 0
+    
+    def entrenar_con_bd(self):
+        partidos = self.db.obtener_todos_partidos()
+        
+        if len(partidos) < 100:
+            return False, "Necesitas al menos 100 partidos para entrenar"
+        
+        X = []
+        y_1x2 = []
+        y_goles = []
+        
+        for p in partidos:
+            try:
+                features = json.loads(p[7]) if p[7] else {}
+                goles_local = p[5]
+                goles_visitante = p[6]
+                
+                X.append([
+                    features.get('forma_local', 0.5),
+                    features.get('forma_visitante', 0.5),
+                    features.get('gf_local', 1.5),
+                    features.get('gc_local', 1.0),
+                    features.get('gf_visitante', 1.0),
+                    features.get('gc_visitante', 1.5),
+                ])
+                
+                if goles_local > goles_visitante:
+                    y_1x2.append(2)
+                elif goles_local == goles_visitante:
+                    y_1x2.append(1)
+                else:
+                    y_1x2.append(0)
+                
+                y_goles.append(goles_local + goles_visitante)
+            except:
+                continue
+        
+        if len(X) < 100:
+            return False, "Datos insuficientes con features válidas"
+        
+        self.modelo_1x2 = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.modelo_1x2.fit(X, y_1x2)
+        
+        scores = cross_val_score(self.modelo_1x2, X, y_1x2, cv=5)
+        self.precision = scores.mean()
+        
+        return True, f"Modelo entrenado con {len(X)} partidos. Precisión: {self.precision*100:.1f}%"
+    
+    def predecir(self, features):
+        if not self.modelo_1x2:
+            return None
+        
+        X = [[
+            features.get('forma_local', 0.5),
+            features.get('forma_visitante', 0.5),
+            features.get('gf_local', 1.5),
+            features.get('gc_local', 1.0),
+            features.get('gf_visitante', 1.0),
+            features.get('gc_visitante', 1.5),
+        ]]
+        
+        probs = self.modelo_1x2.predict_proba(X)[0]
+        
+        resultado = {'Visitante': 0, 'Empate': 0, 'Local': 0}
+        clases = self.modelo_1x2.classes_
+        
+        for i, clase in enumerate(clases):
+            if clase == 0:
+                resultado['Visitante'] = probs[i]
+            elif clase == 1:
+                resultado['Empate'] = probs[i]
+            else:
+                resultado['Local'] = probs[i]
+        
+        return resultado
+
 
 # ============================================================================
 # ANALIZADOR
@@ -1058,6 +1157,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
