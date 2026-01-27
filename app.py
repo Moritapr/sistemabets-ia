@@ -658,7 +658,7 @@ class AnalizadorExperto:
     
     @staticmethod
     def calcular_factor_ajuste(local_team, visitante_team, partidos_local, partidos_visitante):
-        factor_local = 1.0
+        factor_local = 1.2
         factor_visitante = 1.0
         advertencias = []
         
@@ -678,7 +678,7 @@ class AnalizadorExperto:
             factor_local *= 0.90
             advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite visitante")
         elif local_es_elite and visitante_es_elite:
-            factor_local *= 0.95
+            factor_local *= 0.80
             factor_visitante *= 1.20
             advertencias.append("⚔️ Duelo de élites - ambos potenciados")
         
@@ -1369,6 +1369,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
