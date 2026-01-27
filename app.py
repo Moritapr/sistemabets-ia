@@ -917,6 +917,14 @@ def main():
             st.stop()
         
         # Análisis
+        modelo_ml = None
+        prediccion_ml = None
+        if db_manager.contar_partidos() >= 100:
+            modelo_ml = ModeloMLReal(db_manager)
+            exito, mensaje = modelo_ml.entrenar_con_bd()
+            if exito:
+                st.success(f"🤖 {mensaje}")
+
         analisis = AnalizadorExperto.analisis_completo(
             local_team, visitante_team, partidos_local, partidos_visitante, h2h
         )
@@ -1023,6 +1031,17 @@ def main():
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
         
         # Calcular mercados
+        # Predicción ML si el modelo está entrenado
+        if modelo_ml and modelo_ml.modelo_1x2:
+            features_ml = {
+                'forma_local': analisis['forma_local'],
+                'forma_visitante': analisis['forma_visitante'],
+                'gf_local': analisis['detalles_local']['gf'] / 20,
+                'gc_local': analisis['detalles_local']['gc'] / 20,
+                'gf_visitante': analisis['detalles_visitante']['gf'] / 20,
+                'gc_visitante': analisis['detalles_visitante']['gc'] / 20,
+            }
+            prediccion_ml = modelo_ml.predecir(features_ml)
         mercados = calcular_mercados(analisis['lambda_local'], analisis['lambda_visitante'])
         
         # Predicciones principales
@@ -1045,6 +1064,17 @@ def main():
         with col3:
             st.metric(equipo_visitante, f"{mercados['1X2']['Visitante']*100:.1f}%")
             st.caption(f"Cuota: {1/mercados['1X2']['Visitante']:.2f}")
+        # Mostrar predicción ML si existe
+        if prediccion_ml:
+            st.markdown("---")
+            st.subheader("🤖 Predicción Machine Learning")
+            col1, col2, col3 = st.columns(3)
+            col1.metric(f"{equipo_local} (ML)", f"{prediccion_ml['Local']*100:.1f}%")
+            col2.metric("Empate (ML)", f"{prediccion_ml['Empate']*100:.1f}%")
+            col3.metric(f"{equipo_visitante} (ML)", f"{prediccion_ml['Visitante']*100:.1f}%")
+            st.caption(f"📊 Precisión del modelo: {modelo_ml.precision*100:.1f}% | Basado en {db_manager.contar_partidos()} partidos")
+
+  
         
         # Over/Under
         st.subheader("📊 Over/Under")
@@ -1157,6 +1187,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
