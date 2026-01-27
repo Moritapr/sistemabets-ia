@@ -491,13 +491,13 @@ class AnalizadorExperto:
         
         media_goles = (gf_local_tabla + gf_visitante_tabla) / 2
         
-        lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
+   lambda_local = (gf_local_casa / max(media_goles, 0.5)) * (gc_visitante_fuera / max(media_goles, 0.5)) * media_goles
         lambda_visitante = (gf_visitante_fuera / max(media_goles, 0.5)) * (gc_local_casa / max(media_goles, 0.5)) * media_goles
         
         lambda_local *= 1.15
         lambda_visitante /= 1.08
         
-           if forma_local > 0.75:
+        if forma_local > 0.75:
             lambda_local *= 1.12
         elif forma_local > 0.60:
             lambda_local *= 1.05
@@ -515,7 +515,7 @@ class AnalizadorExperto:
         elif forma_visitante < 0.45:
             lambda_visitante *= 0.92
         
-       lambda_local *= factor_local
+        lambda_local *= factor_local
         lambda_visitante *= factor_visitante
         
         # Ajuste por H2H histórico
@@ -1056,6 +1056,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
