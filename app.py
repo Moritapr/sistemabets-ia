@@ -11,7 +11,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 1. PRIMERO DEFINIMOS LA VARIABLE
-URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/logo.png"
+URL_LOGO_MEDIEVAL = "https://raw.githubusercontent.com/Moritapr/sistemabets-ia/main/faviicon.png"
 
 # 2. LUEGO LA USAMOS EN LA CONFIGURACIÓN
 st.set_page_config(
@@ -1006,6 +1006,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
