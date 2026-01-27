@@ -19,11 +19,6 @@ st.set_page_config(
 
 # --- INYECCIÓN DE IDENTIDAD PWA ---
 st.markdown(f"""
-    <style>
-        /* Solo ocultamos el header de Streamlit para ganar espacio, manteniendo tu login intacto */
-        header {{visibility: hidden;}}
-        .block-container {{padding-top: 2rem;}}
-    </style>
     
     <head>
         <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1008,6 +1003,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
