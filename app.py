@@ -29,13 +29,7 @@ st.markdown("""
         <link rel="manifest" href="manifest.json">
     </head>
     
-    <style>
-        /* Limpieza de interfaz para que parezca nativa */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-        .block-container {padding-top: 1rem; padding-bottom: 0rem;}
-    </style>
+ 
     """, unsafe_allow_html=True)
 # ============================================================================
 # BASE DE DATOS
@@ -1013,4 +1007,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
