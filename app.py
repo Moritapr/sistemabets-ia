@@ -708,19 +708,11 @@ class AnalizadorExperto:
         gf_visitante_fuera = stats_visitante['visitante_gf'] / max(stats_visitante['visitante_pj'], 1) if stats_visitante['visitante_pj'] > 0 else gf_visitante_tabla
         gc_visitante_fuera = stats_visitante['visitante_gc'] / max(stats_visitante['visitante_pj'], 1) if stats_visitante['visitante_pj'] > 0 else gc_visitante_tabla
         
-        # Cálculo de lambda más directo y realista
-        # Combina promedio general + específico local/visitante
-        ataque_local = (gf_local_tabla * 0.5) + (gf_local_casa * 0.5)
-        ataque_visitante = (gf_visitante_tabla * 0.5) + (gf_visitante_fuera * 0.5)
+        # Cálculo de lambda simplificado y balanceado
+        # Lambda = promedio de (ataque propio + debilidad defensiva rival) / 2
         
-        defensa_local = gc_local_tabla
-        defensa_visitante = gc_visitante_tabla
-        
-        # Lambda = ataque propio * (defensa rival / promedio liga) * factor
-        promedio_gc_liga = 1.25  # Promedio típico de goles concedidos
-        
-        lambda_local = ataque_local * (defensa_visitante / promedio_gc_liga) * 1.10
-        lambda_visitante = ataque_visitante * (defensa_local / promedio_gc_liga) * 0.95
+        lambda_local = (gf_local_tabla + gc_visitante_tabla) / 2 * 1.08
+        lambda_visitante = (gf_visitante_tabla + gc_local_tabla) / 2 * 0.92
         
         if forma_local > 0.75:
             lambda_local *= 1.12
@@ -1373,6 +1365,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
