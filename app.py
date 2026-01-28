@@ -415,9 +415,8 @@ class RecolectorAutomatico:
         
         return True, f"Modelo entrenado con {len(X)} partidos. Precisión: {self.precision*100:.1f}%"
 
-5.3 — ACTUALIZAR PREDICCIÓN ML
-Busca la función predecir en ModeloMLReal y reemplázala por:
-python    def predecir(self, features):
+
+    def predecir(self, features):
         if not self.modelo_1x2:
             return None
         
@@ -1544,6 +1543,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
