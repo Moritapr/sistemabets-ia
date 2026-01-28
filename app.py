@@ -356,7 +356,7 @@ class RecolectorAutomatico:
 
 
 
-       def entrenar_con_bd(self):
+    def entrenar_con_bd(self):
         partidos = self.db.obtener_todos_partidos()
         
         if len(partidos) < 100:
@@ -1544,6 +1544,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
