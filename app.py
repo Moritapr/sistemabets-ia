@@ -345,8 +345,153 @@ class RecolectorAutomatico:
                         'visitante': partido['visitante'],
                         'goles_local': partido['goles_local'],
                         'goles_visitante': partido['goles_visitante'],
-                        'features': {'goles_local': partido['goles_local'], 'goles_visitante': partido['goles_visitante']}
+                        'features': {
+                            'goles_local': partido['goles_local'],
+                            'goles_visitante': partido['goles_visitante'],
+                            'total_goles': partido['goles_local'] + partido['goles_visitante'],
+                            'btts': 1 if partido['goles_local'] > 0 and partido['goles_visitante'] > 0 else 0,
+                            'over25': 1 if (partido['goles_local'] + partido['goles_visitante']) > 2.5 else 0,
+                        }
                     }
+
+5.2 — ACTUALIZAR MODELO ML
+Busca la función entrenar_con_bd en la clase ModeloMLReal y reemplázala completa por:
+python    def entrenar_con_bd(self):
+        partidos = self.db.obtener_todos_partidos()
+        
+        if len(partidos) < 100:
+            return False, "Necesitas al menos 100 partidos para entrenar"
+        
+        X = []
+        y_1x2 = []
+        
+        for p in partidos:
+            try:
+                features = json.loads(p[7]) if p[7] else {}
+                goles_local = p[5]
+                goles_visitante = p[6]
+                
+                # Features expandidas
+                X.append([
+                    features.get('forma_local', 0.5),
+                    features.get('forma_visitante', 0.5),
+                    features.get('gf_local', 1.5),
+                    features.get('gc_local', 1.0),
+                    features.get('gf_visitante', 1.0),
+                    features.get('gc_visitante', 1.5),
+                    features.get('posicion_local', 10),
+                    features.get('posicion_visitante', 10),
+                    features.get('puntos_local', 20),
+                    features.get('puntos_visitante', 20),
+                    features.get('racha_local', 0.5),
+                    features.get('racha_visitante', 0.5),
+                    features.get('es_elite_local', 0),
+                    features.get('es_elite_visitante', 0),
+                    features.get('diff_posicion', 0),
+                ])
+                
+                if goles_local > goles_visitante:
+                    y_1x2.append(2)
+                elif goles_local == goles_visitante:
+                    y_1x2.append(1)
+                else:
+                    y_1x2.append(0)
+            except:
+                continue
+        
+        if len(X) < 100:
+            return False, "Datos insuficientes con features válidas"
+        
+        self.modelo_1x2 = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42
+        )
+        self.modelo_1x2.fit(X, y_1x2)
+        
+        scores = cross_val_score(self.modelo_1x2, X, y_1x2, cv=5)
+        self.precision = scores.mean()
+        
+        return True, f"Modelo entrenado con {len(X)} partidos. Precisión: {self.precision*100:.1f}%"
+
+5.3 — ACTUALIZAR PREDICCIÓN ML
+Busca la función predecir en ModeloMLReal y reemplázala por:
+python    def predecir(self, features):
+        if not self.modelo_1x2:
+            return None
+        
+        X = [[
+            features.get('forma_local', 0.5),
+            features.get('forma_visitante', 0.5),
+            features.get('gf_local', 1.5),
+            features.get('gc_local', 1.0),
+            features.get('gf_visitante', 1.0),
+            features.get('gc_visitante', 1.5),
+            features.get('posicion_local', 10),
+            features.get('posicion_visitante', 10),
+            features.get('puntos_local', 20),
+            features.get('puntos_visitante', 20),
+            features.get('racha_local', 0.5),
+            features.get('racha_visitante', 0.5),
+            features.get('es_elite_local', 0),
+            features.get('es_elite_visitante', 0),
+            features.get('diff_posicion', 0),
+        ]]
+        
+        probs = self.modelo_1x2.predict_proba(X)[0]
+        
+        resultado = {'Visitante': 0, 'Empate': 0, 'Local': 0}
+        clases = self.modelo_1x2.classes_
+        
+        for i, clase in enumerate(clases):
+            if clase == 0:
+                resultado['Visitante'] = probs[i]
+            elif clase == 1:
+                resultado['Empate'] = probs[i]
+            else:
+                resultado['Local'] = probs[i]
+        
+        return resultado
+
+5.4 — ACTUALIZAR FEATURES EN UI
+Busca este bloque en la UI (donde se llama modelo_ml.predecir):
+python        if modelo_ml and modelo_ml.modelo_1x2:
+            features_ml = {
+                'forma_local': analisis['forma_local'],
+                'forma_visitante': analisis['forma_visitante'],
+                'gf_local': analisis['detalles_local']['gf'] / 20,
+                'gc_local': analisis['detalles_local']['gc'] / 20,
+                'gf_visitante': analisis['detalles_visitante']['gf'] / 20,
+                'gc_visitante': analisis['detalles_visitante']['gc'] / 20,
+            }
+            prediccion_ml = modelo_ml.predecir(features_ml)
+Reemplázalo por:
+python        if modelo_ml and modelo_ml.modelo_1x2:
+            # Calcular racha (últimos 5 partidos)
+            racha_local = sum(1 for r in analisis['detalles_local']['racha_actual'] if r == '✅') / 5
+            racha_visitante = sum(1 for r in analisis['detalles_visitante']['racha_actual'] if r == '✅') / 5
+            
+            features_ml = {
+                'forma_local': analisis['forma_local'],
+                'forma_visitante': analisis['forma_visitante'],
+                'gf_local': analisis['detalles_local']['gf'] / 20,
+                'gc_local': analisis['detalles_local']['gc'] / 20,
+                'gf_visitante': analisis['detalles_visitante']['gf'] / 20,
+                'gc_visitante': analisis['detalles_visitante']['gc'] / 20,
+                'posicion_local': local_team['Posicion'],
+                'posicion_visitante': visitante_team['Posicion'],
+                'puntos_local': local_team['Pts'],
+                'puntos_visitante': visitante_team['Pts'],
+                'racha_local': racha_local,
+                'racha_visitante': racha_visitante,
+                'es_elite_local': 1 if local_team['Equipo'] in FootballDataAPI.ELITE_TEAMS else 0,
+                'es_elite_visitante': 1 if visitante_team['Equipo'] in FootballDataAPI.ELITE_TEAMS else 0,
+                'diff_posicion': visitante_team['Posicion'] - local_team['Posicion'],
+            }
+            prediccion_ml = modelo_ml.predecir(features_ml)
+
+
                     
                     if self.db_manager.guardar_partido(partido_data):
                         partidos_nuevos += 1
@@ -503,7 +648,6 @@ class ModeloMLReal:
         
         X = []
         y_1x2 = []
-        y_goles = []
         
         for p in partidos:
             try:
@@ -511,6 +655,7 @@ class ModeloMLReal:
                 goles_local = p[5]
                 goles_visitante = p[6]
                 
+                # Features expandidas
                 X.append([
                     features.get('forma_local', 0.5),
                     features.get('forma_visitante', 0.5),
@@ -518,6 +663,15 @@ class ModeloMLReal:
                     features.get('gc_local', 1.0),
                     features.get('gf_visitante', 1.0),
                     features.get('gc_visitante', 1.5),
+                    features.get('posicion_local', 10),
+                    features.get('posicion_visitante', 10),
+                    features.get('puntos_local', 20),
+                    features.get('puntos_visitante', 20),
+                    features.get('racha_local', 0.5),
+                    features.get('racha_visitante', 0.5),
+                    features.get('es_elite_local', 0),
+                    features.get('es_elite_visitante', 0),
+                    features.get('diff_posicion', 0),
                 ])
                 
                 if goles_local > goles_visitante:
@@ -526,15 +680,18 @@ class ModeloMLReal:
                     y_1x2.append(1)
                 else:
                     y_1x2.append(0)
-                
-                y_goles.append(goles_local + goles_visitante)
             except:
                 continue
         
         if len(X) < 100:
             return False, "Datos insuficientes con features válidas"
         
-        self.modelo_1x2 = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.modelo_1x2 = RandomForestClassifier(
+            n_estimators=200,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42
+        )
         self.modelo_1x2.fit(X, y_1x2)
         
         scores = cross_val_score(self.modelo_1x2, X, y_1x2, cv=5)
@@ -553,6 +710,15 @@ class ModeloMLReal:
             features.get('gc_local', 1.0),
             features.get('gf_visitante', 1.0),
             features.get('gc_visitante', 1.5),
+            features.get('posicion_local', 10),
+            features.get('posicion_visitante', 10),
+            features.get('puntos_local', 20),
+            features.get('puntos_visitante', 20),
+            features.get('racha_local', 0.5),
+            features.get('racha_visitante', 0.5),
+            features.get('es_elite_local', 0),
+            features.get('es_elite_visitante', 0),
+            features.get('diff_posicion', 0),
         ]]
         
         probs = self.modelo_1x2.predict_proba(X)[0]
@@ -1188,6 +1354,10 @@ def main():
         # Calcular mercados
         # Predicción ML si el modelo está entrenado
         if modelo_ml and modelo_ml.modelo_1x2:
+            # Calcular racha (últimos 5 partidos)
+            racha_local = sum(1 for r in analisis['detalles_local']['racha_actual'] if r == '✅') / 5
+            racha_visitante = sum(1 for r in analisis['detalles_visitante']['racha_actual'] if r == '✅') / 5
+            
             features_ml = {
                 'forma_local': analisis['forma_local'],
                 'forma_visitante': analisis['forma_visitante'],
@@ -1195,6 +1365,15 @@ def main():
                 'gc_local': analisis['detalles_local']['gc'] / 20,
                 'gf_visitante': analisis['detalles_visitante']['gf'] / 20,
                 'gc_visitante': analisis['detalles_visitante']['gc'] / 20,
+                'posicion_local': local_team['Posicion'],
+                'posicion_visitante': visitante_team['Posicion'],
+                'puntos_local': local_team['Pts'],
+                'puntos_visitante': visitante_team['Pts'],
+                'racha_local': racha_local,
+                'racha_visitante': racha_visitante,
+                'es_elite_local': 1 if local_team['Equipo'] in FootballDataAPI.ELITE_TEAMS else 0,
+                'es_elite_visitante': 1 if visitante_team['Equipo'] in FootballDataAPI.ELITE_TEAMS else 0,
+                'diff_posicion': visitante_team['Posicion'] - local_team['Posicion'],
             }
             prediccion_ml = modelo_ml.predecir(features_ml)
         mercados = calcular_mercados(analisis['lambda_local'], analisis['lambda_visitante'])
