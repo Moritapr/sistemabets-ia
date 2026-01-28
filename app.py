@@ -315,7 +315,7 @@ class RecolectorAutomatico:
         self.api = api
         self.db_manager = db_manager
     
-    def recolectar_liga_completa(self, liga_code, liga_nombre, max_partidos=50):
+      def recolectar_liga_completa(self, liga_code, liga_nombre, max_partidos=50):
         df_equipos = self.api.obtener_standings(liga_code)
         if df_equipos is None:
             return 0, 0, ["No se pudo cargar la tabla"]
@@ -354,9 +354,9 @@ class RecolectorAutomatico:
                         }
                     }
 
-5.2 — ACTUALIZAR MODELO ML
-Busca la función entrenar_con_bd en la clase ModeloMLReal y reemplázala completa por:
-python    def entrenar_con_bd(self):
+
+
+       def entrenar_con_bd(self):
         partidos = self.db.obtener_todos_partidos()
         
         if len(partidos) < 100:
@@ -1544,6 +1544,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
