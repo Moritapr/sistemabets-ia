@@ -656,7 +656,7 @@ class AnalizadorExperto:
         
         return stats
     
-   @staticmethod
+    @staticmethod
     def calcular_factor_ajuste(local_team, visitante_team, partidos_local, partidos_visitante):
         factor_local = 1.0
         factor_visitante = 1.0
@@ -1367,6 +1367,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
