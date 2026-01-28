@@ -453,9 +453,8 @@ class RecolectorAutomatico:
         
         return resultado
 
-5.4 — ACTUALIZAR FEATURES EN UI
-Busca este bloque en la UI (donde se llama modelo_ml.predecir):
-python        if modelo_ml and modelo_ml.modelo_1x2:
+
+         if modelo_ml and modelo_ml.modelo_1x2:
             features_ml = {
                 'forma_local': analisis['forma_local'],
                 'forma_visitante': analisis['forma_visitante'],
@@ -465,8 +464,8 @@ python        if modelo_ml and modelo_ml.modelo_1x2:
                 'gc_visitante': analisis['detalles_visitante']['gc'] / 20,
             }
             prediccion_ml = modelo_ml.predecir(features_ml)
-Reemplázalo por:
-python        if modelo_ml and modelo_ml.modelo_1x2:
+
+        if modelo_ml and modelo_ml.modelo_1x2:
             # Calcular racha (últimos 5 partidos)
             racha_local = sum(1 for r in analisis['detalles_local']['racha_actual'] if r == '✅') / 5
             racha_visitante = sum(1 for r in analisis['detalles_visitante']['racha_actual'] if r == '✅') / 5
@@ -1543,6 +1542,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
