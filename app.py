@@ -656,34 +656,32 @@ class AnalizadorExperto:
         
         return stats
     
-    @staticmethod
+   @staticmethod
     def calcular_factor_ajuste(local_team, visitante_team, partidos_local, partidos_visitante):
-        factor_local = 1.2
+        factor_local = 1.0
         factor_visitante = 1.0
         advertencias = []
         
-        # Detectar si AMBOS equipos son de élite (no aplica ajuste)
         local_es_elite = local_team['Equipo'] in FootballDataAPI.ELITE_TEAMS
         visitante_es_elite = visitante_team['Equipo'] in FootballDataAPI.ELITE_TEAMS
         
-        # Solo aplicar ajuste si UNO es élite y el otro NO
-        es_europea = False  # Ya no usamos esta detección automática
-        
-        if local_es_elite and not visitante_es_elite:
-            factor_local *= 1.15
-            factor_visitante *= 0.88
+        if local_es_elite and visitante_es_elite:
+            # Duelo de élites: ligera ventaja local
+            factor_local = 1.05
+            factor_visitante = 1.00
+            advertencias.append("⚔️ Duelo de élites - ambos potenciados")
+        elif local_es_elite and not visitante_es_elite:
+            # Local élite vs visitante normal
+            factor_local = 1.15
+            factor_visitante = 0.90
             advertencias.append(f"🌟 {local_team['Equipo']} es equipo de élite")
         elif visitante_es_elite and not local_es_elite:
-            factor_visitante *= 1.25
-            factor_local *= 0.90
+            # Visitante élite vs local normal
+            factor_local = 0.95
+            factor_visitante = 1.10
             advertencias.append(f"🌟 {visitante_team['Equipo']} es equipo de élite visitante")
-        elif local_es_elite and visitante_es_elite:
-            factor_local *= 0.80
-            factor_visitante *= 1.80
-            advertencias.append("⚔️ Duelo de élites - ambos potenciados")
         
         return factor_local, factor_visitante, advertencias
-    
     @staticmethod
     def analisis_completo(local_team, visitante_team, partidos_local, partidos_visitante, h2h):
         factor_local, factor_visitante, advertencias = AnalizadorExperto.calcular_factor_ajuste(
@@ -1369,6 +1367,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
