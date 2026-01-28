@@ -315,7 +315,7 @@ class RecolectorAutomatico:
         self.api = api
         self.db_manager = db_manager
     
-      def recolectar_liga_completa(self, liga_code, liga_nombre, max_partidos=50):
+    def recolectar_liga_completa(self, liga_code, liga_nombre, max_partidos=50):
         df_equipos = self.api.obtener_standings(liga_code)
         if df_equipos is None:
             return 0, 0, ["No se pudo cargar la tabla"]
@@ -1544,6 +1544,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
