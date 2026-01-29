@@ -134,14 +134,14 @@ class FootballDataAPI:
     BASE_URL = "https://api.football-data.org/v4"
     
     LIGAS = {
-        "Champions League": "CL", "Europa League": "EL", "Premier League": "PL", 
-        "La Liga": "PD", "Bundesliga": "BL1", "Serie A": "SA", "Ligue 1": "FL1",
+        "Champions League": "CL", "Premier League": "PL", "La Liga": "PD",
+        "Bundesliga": "BL1", "Serie A": "SA", "Ligue 1": "FL1",
         "Eredivisie": "DED", "Championship": "ELC", "Liga Portugal": "PPL"
     }
     
     LIGA_STRENGTH = {
         'PL': 10, 'PD': 9.5, 'BL1': 9, 'SA': 8.5, 'FL1': 8,
-        'PPL': 6, 'DED': 7, 'ELC': 7.5, 'CL': 10, 'EL': 9
+        'PPL': 6, 'DED': 7, 'ELC': 7.5, 'CL': 10
     }
     
     ELITE_TEAMS = {
@@ -1422,6 +1422,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
