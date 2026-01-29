@@ -168,25 +168,49 @@ class FootballDataAPI:
             if not data.get('standings'):
                 return None
             
-            standings = data['standings'][0]['table']
             equipos = []
             
-            for team in standings:
-                self.cache_teams[team['team']['name']] = team['team']['id']
-                equipos.append({
-                    'Equipo': team['team']['name'],
-                    'ID': team['team']['id'],
-                    'PJ': team['playedGames'],
-                    'Victorias': team['won'],
-                    'Empates': team['draw'],
-                    'Derrotas': team['lost'],
-                    'GF': team['goalsFor'],
-                    'GC': team['goalsAgainst'],
-                    'Pts': team['points'],
-                    'Posicion': team['position']
-                })
+            # Competiciones europeas tienen múltiples grupos
+            for standing in data['standings']:
+                if standing.get('type') == 'TOTAL' or standing.get('stage') == 'LEAGUE_PHASE' or 'GROUP' in standing.get('group', ''):
+                    tabla = standing.get('table', [])
+                    for team in tabla:
+                        self.cache_teams[team['team']['name']] = team['team']['id']
+                        
+                        # Evitar duplicados
+                        if not any(e['Equipo'] == team['team']['name'] for e in equipos):
+                            equipos.append({
+                                'Equipo': team['team']['name'],
+                                'ID': team['team']['id'],
+                                'PJ': team['playedGames'],
+                                'Victorias': team['won'],
+                                'Empates': team['draw'],
+                                'Derrotas': team['lost'],
+                                'GF': team['goalsFor'],
+                                'GC': team['goalsAgainst'],
+                                'Pts': team['points'],
+                                'Posicion': team['position']
+                            })
             
-            return pd.DataFrame(equipos)
+            # Si no encontró con el método anterior, usar el original
+            if not equipos and data['standings']:
+                standings = data['standings'][0]['table']
+                for team in standings:
+                    self.cache_teams[team['team']['name']] = team['team']['id']
+                    equipos.append({
+                        'Equipo': team['team']['name'],
+                        'ID': team['team']['id'],
+                        'PJ': team['playedGames'],
+                        'Victorias': team['won'],
+                        'Empates': team['draw'],
+                        'Derrotas': team['lost'],
+                        'GF': team['goalsFor'],
+                        'GC': team['goalsAgainst'],
+                        'Pts': team['points'],
+                        'Posicion': team['position']
+                    })
+            
+            return pd.DataFrame(equipos) if equipos else None
         except Exception as e:
             st.error(f"Error API: {str(e)}")
             return None
@@ -1405,6 +1429,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
