@@ -210,6 +210,12 @@ class FootballDataAPI:
                         'Posicion': team['position']
                     })
             
+            # DEBUG - Ver qué encontró
+            if liga_code in ['EL', 'CL']:
+                st.write(f"DEBUG: Encontrados {len(equipos)} equipos")
+                if equipos:
+                    st.write(f"DEBUG: Primer equipo: {equipos[0]['Equipo']}")
+            
             return pd.DataFrame(equipos) if equipos else None
         except Exception as e:
             st.error(f"Error API: {str(e)}")
@@ -1429,6 +1435,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
