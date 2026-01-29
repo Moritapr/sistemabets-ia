@@ -161,22 +161,10 @@ class FootballDataAPI:
         try:
             url = f"{self.BASE_URL}/competitions/{liga_code}/standings"
             response = requests.get(url, headers=self.headers, timeout=15)
-            
-            # DEBUG
-            st.write(f"DEBUG: Status code: {response.status_code}")
-            
             if response.status_code != 200:
-                st.write(f"DEBUG: Error response: {response.text[:500]}")
                 return None
             
             data = response.json()
-            
-            # DEBUG
-            st.write(f"DEBUG: Standings encontrados: {len(data.get('standings', []))}")
-            if data.get('standings'):
-                for i, s in enumerate(data['standings'][:3]):
-                    st.write(f"DEBUG: Standing {i}: type={s.get('type')}, stage={s.get('stage')}, group={s.get('group')}")
-            
             if not data.get('standings'):
                 return None
             
@@ -200,8 +188,6 @@ class FootballDataAPI:
                             'Pts': team['points'],
                             'Posicion': team['position']
                         })
-            
-            st.write(f"DEBUG: Total equipos: {len(equipos)}")
             
             return pd.DataFrame(equipos) if equipos else None
         except Exception as e:
@@ -1422,6 +1408,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
