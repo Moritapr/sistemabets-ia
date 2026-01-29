@@ -161,60 +161,47 @@ class FootballDataAPI:
         try:
             url = f"{self.BASE_URL}/competitions/{liga_code}/standings"
             response = requests.get(url, headers=self.headers, timeout=15)
+            
+            # DEBUG
+            st.write(f"DEBUG: Status code: {response.status_code}")
+            
             if response.status_code != 200:
+                st.write(f"DEBUG: Error response: {response.text[:500]}")
                 return None
             
             data = response.json()
+            
+            # DEBUG
+            st.write(f"DEBUG: Standings encontrados: {len(data.get('standings', []))}")
+            if data.get('standings'):
+                for i, s in enumerate(data['standings'][:3]):
+                    st.write(f"DEBUG: Standing {i}: type={s.get('type')}, stage={s.get('stage')}, group={s.get('group')}")
+            
             if not data.get('standings'):
                 return None
             
             equipos = []
             
-            # Competiciones europeas tienen múltiples grupos
             for standing in data['standings']:
-                if standing.get('type') == 'TOTAL' or standing.get('stage') == 'LEAGUE_PHASE' or 'GROUP' in standing.get('group', ''):
-                    tabla = standing.get('table', [])
-                    for team in tabla:
-                        self.cache_teams[team['team']['name']] = team['team']['id']
-                        
-                        # Evitar duplicados
-                        if not any(e['Equipo'] == team['team']['name'] for e in equipos):
-                            equipos.append({
-                                'Equipo': team['team']['name'],
-                                'ID': team['team']['id'],
-                                'PJ': team['playedGames'],
-                                'Victorias': team['won'],
-                                'Empates': team['draw'],
-                                'Derrotas': team['lost'],
-                                'GF': team['goalsFor'],
-                                'GC': team['goalsAgainst'],
-                                'Pts': team['points'],
-                                'Posicion': team['position']
-                            })
-            
-            # Si no encontró con el método anterior, usar el original
-            if not equipos and data['standings']:
-                standings = data['standings'][0]['table']
-                for team in standings:
+                tabla = standing.get('table', [])
+                for team in tabla:
                     self.cache_teams[team['team']['name']] = team['team']['id']
-                    equipos.append({
-                        'Equipo': team['team']['name'],
-                        'ID': team['team']['id'],
-                        'PJ': team['playedGames'],
-                        'Victorias': team['won'],
-                        'Empates': team['draw'],
-                        'Derrotas': team['lost'],
-                        'GF': team['goalsFor'],
-                        'GC': team['goalsAgainst'],
-                        'Pts': team['points'],
-                        'Posicion': team['position']
-                    })
+                    
+                    if not any(e['Equipo'] == team['team']['name'] for e in equipos):
+                        equipos.append({
+                            'Equipo': team['team']['name'],
+                            'ID': team['team']['id'],
+                            'PJ': team['playedGames'],
+                            'Victorias': team['won'],
+                            'Empates': team['draw'],
+                            'Derrotas': team['lost'],
+                            'GF': team['goalsFor'],
+                            'GC': team['goalsAgainst'],
+                            'Pts': team['points'],
+                            'Posicion': team['position']
+                        })
             
-            # DEBUG - Ver qué encontró
-            if liga_code in ['EL', 'CL']:
-                st.write(f"DEBUG: Encontrados {len(equipos)} equipos")
-                if equipos:
-                    st.write(f"DEBUG: Primer equipo: {equipos[0]['Equipo']}")
+            st.write(f"DEBUG: Total equipos: {len(equipos)}")
             
             return pd.DataFrame(equipos) if equipos else None
         except Exception as e:
@@ -1435,6 +1422,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
